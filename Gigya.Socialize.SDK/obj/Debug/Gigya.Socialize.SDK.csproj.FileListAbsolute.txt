@@ -1,0 +1,5 @@
+D:\dvlp\Github\DotNet\Gigya.Socialize.SDK\bin\Debug\GSCSharpSDK.dll
+D:\dvlp\Github\DotNet\Gigya.Socialize.SDK\bin\Debug\GSCSharpSDK.pdb
+D:\dvlp\Github\DotNet\Gigya.Socialize.SDK\obj\Debug\Gigya.Socialize.SDK.csprojResolveAssemblyReference.cache
+D:\dvlp\Github\DotNet\Gigya.Socialize.SDK\obj\Debug\GSCSharpSDK.dll
+D:\dvlp\Github\DotNet\Gigya.Socialize.SDK\obj\Debug\GSCSharpSDK.pdb
