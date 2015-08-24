@@ -1,5 +1,0 @@
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\bin\Debug\GSCSharpSDK.dll
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\bin\Debug\GSCSharpSDK.pdb
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\obj\Debug\Gigya.Socialize.SDK.csprojResolveAssemblyReference.cache
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\obj\Debug\GSCSharpSDK.dll
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\obj\Debug\GSCSharpSDK.pdb

@@ -1,4 +1,0 @@
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\bin\Release\GSCSharpSDK.dll
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\bin\Release\GSCSharpSDK.pdb
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\obj\Release\GSCSharpSDK.dll
-D:\dvlp\Github\DotNet\output\GSCSharpSDK\obj\Release\GSCSharpSDK.pdb
