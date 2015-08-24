@@ -32,6 +32,11 @@ namespace Gigya.Socialize.SDK
         public static bool EnableConnectionPooling = true;
 
         /// <summary>
+        /// Set a proxy for the requests.
+        /// </summary>
+        public IWebProxy Proxy;
+
+        /// <summary>
         /// The maximum number of concurrent connections that can remain open to the Gigya servers, assuming
         /// EnableConnectionPooling was enabled (above). Default: 100.
         /// </summary>
@@ -122,6 +127,12 @@ namespace Gigya.Socialize.SDK
         private static int nonceCounter = 0;
         private static int maxConcurrentConnections = 100;
         private static Semaphore semaphore = new Semaphore(maxConcurrentConnections, maxConcurrentConnections);
+
+        /// <summary>
+        /// THIS FIELD IS FOR TESTING PRUPOSES ONLY, setting this field to false involves a security risk.
+        /// When set to false, requests won't be signed and the secret token will be sent instead.
+        /// </summary>
+        private bool SignRequests = true;
 
         /// <summary>
         /// The delta between our clock and Gigya's servers. We use it to correct the timestamp we put on outgoing
@@ -226,9 +237,11 @@ namespace Gigya.Socialize.SDK
         /// that user's secret key and not the site's secret key. The apiKey may be null when calling permissions.* APIs
         /// which are not site-specific.</param>
         /// <param name="additionalHeaders">A collection of additional headers for the HTTP request.</param>
+        /// <param name="proxy">Proxy for the HTTP request.</param>
         public GSRequest(string apiKey, string secretKey, string apiMethod, object clientParams, bool useHTTPS,
-            string userKey = null, NameValueCollection additionalHeaders = null)
+            string userKey = null, NameValueCollection additionalHeaders = null, IWebProxy proxy = null)
         {
+            Proxy = proxy;
             GSObject gsObjParams = null;
             if (clientParams is GSObject)
                 gsObjParams = clientParams as GSObject;
@@ -636,7 +649,7 @@ namespace Gigya.Socialize.SDK
             gsReq.SetParam("sdk", "dotnet_" + version);
             // Set Protocol and URI
             string protocol =
-                (gsReq.useHTTPS || gsReq.secretKey == null) ? "https" : "http";
+                (gsReq.useHTTPS || gsReq.secretKey == null || !gsReq.SignRequests) ? "https" : "http";
             string resourceURI = protocol + "://" + gsReq.domain + gsReq.path;
 
             if (gsReq.secretKey == null)
@@ -652,20 +665,31 @@ namespace Gigya.Socialize.SDK
 
                 // Set Timestamp and Nonce
                 long currTime = SigUtils.CurrentTimeMillis() + timeCorrection;
-                string timestamp = (currTime / 1000).ToString();
                 string nonce = DateTime.Now.ToFileTime().ToString() + "_" + (Interlocked.Increment(ref nonceCounter)).ToString();
 
                 // Set params. DO THIS *BEFORE* CALCULATING THE SIGNATURE 
 
-                gsReq.SetParam("timestamp", timestamp);
-                gsReq.SetParam("nonce", nonce);
+                if (gsReq.SignRequests)//Parameter needed only for signature.
+                {
+                    string timestamp = (currTime / 1000).ToString();
+                    gsReq.SetParam("timestamp", timestamp);
+                    gsReq.SetParam("nonce", nonce);
+                }
 
                 // Calculate signature. DO THIS ONLY *AFTER* PUTTING ALL OTHER PARAMS IN DICTIONARY
                 gsReq.dictionaryParams.Remove("sig"); // In case we attempted to send that request already
                 string basestring = SigUtils.CalcOAuth1Basestring(httpMethod, resourceURI, gsReq.dictionaryParams);
                 gsReq.logger.Write("baseString", basestring);
-                string signature = SigUtils.CalcSignature(basestring, gsReq.secretKey);
-                gsReq.SetParam("sig", signature);
+
+                if (gsReq.SignRequests)
+                {
+                    string signature = SigUtils.CalcSignature(basestring, gsReq.secretKey);
+                    gsReq.SetParam("sig", signature);
+                }
+                else//Send secret key explicitly.
+                {
+                    gsReq.SetParam("secret", gsReq.secretKey);
+                }
             }
 
             gsReq.logger.Write("serverParams", gsReq.dictionaryParams);
@@ -733,6 +757,7 @@ namespace Gigya.Socialize.SDK
         {
             byte[] form_body;
             request = PrepareHttpRequest(this, httpMethod, timeout, out form_body);
+            if (Proxy != null) request.Proxy = Proxy;
 
             // Write content to the request.
             using (Stream stream = request.GetRequestStream())
