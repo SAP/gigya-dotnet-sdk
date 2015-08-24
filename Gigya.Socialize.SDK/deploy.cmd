@@ -6,10 +6,9 @@ msbuild /p:Configuration=Release
 rmdir /S /Q ..\output
 mkdir ..\output
 
-tf checkout ..\output /recursive
-
-xcopy /Y *.cs ..\output\GSCSharpSDK
-xcopy /Y Properties\*.cs ..\output\GSCSharpSDK\Properties
+xcopy /Y ..\ProjectTemplate\* ..\output\GSCSharpSDK\
+xcopy /Y *.cs ..\output\GSCSharpSDK\
+xcopy /Y Properties\*.cs ..\output\GSCSharpSDK\Properties\
 
 msbuild ..\output\GSCSharpSDK\Gigya.Socialize.SDK.csproj /target:Clean /p:Configuration=Release
 msbuild ..\output\GSCSharpSDK\Gigya.Socialize.SDK.csproj /p:Configuration=Release /p:SignAssembly=true /p:AssemblyOriginatorKeyFile=..\..\DO_NOT_PUBLISH_AssemblyStrongNameKey.snk
@@ -18,9 +17,8 @@ msbuild ..\output\GSCSharpSDK\Gigya.Socialize.SDK.csproj /target:Clean /p:Config
 msbuild ..\output\GSCSharpSDK\Gigya.Socialize.SDK.csproj /p:Configuration=Debug   /p:SignAssembly=true /p:AssemblyOriginatorKeyFile=..\..\DO_NOT_PUBLISH_AssemblyStrongNameKey.snk
 
 mkdir ..\output\bin
-move ..\output\GSCSharpSDK\bin\Release\*.dll ..\output\Bin
+move ..\output\GSCSharpSDK\bin\Release\*.dll ..\output\bin
 rmdir /S /Q ..\output\GSCSharpSDK\bin
 rmdir /S /Q ..\output\GSCSharpSDK\obj
 
-tf checkin ..\output /recursive /noprompt /comment:"SDK Deploy Batch"
 pause
