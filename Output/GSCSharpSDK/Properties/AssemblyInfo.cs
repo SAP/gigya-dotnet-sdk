@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Gigya Inc.")]
 [assembly: AssemblyProduct("Gigya Socialize SDK")]
-[assembly: AssemblyCopyright("Copyright © Gigya 2010")]
+[assembly: AssemblyCopyright("Copyright © Gigya 2015")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
