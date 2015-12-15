@@ -1,11 +1,6 @@
-Gigya.Socialize.SDK\bin\
-Gigya.Socialize.SDK\obj\
-output\GSCSharpSDK\bin\
-output\GSCSharpSDK\obj\
-SDK_Console_Tester\bin\
-SDK_Console_Tester\obj\
 SDK_Console_Tester\Properties\
-SDK_Tester\bin\
-SDK_Tester\obj\
 *.suo
 *.user
+**/obj/
+**/bin/
+
