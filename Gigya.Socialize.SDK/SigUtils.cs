@@ -1,6 +1,6 @@
 ﻿/*
  * Copyright (C) 2011 Gigya, Inc.
- * Version 2.15.1
+ * Version 2.15.7
  */
 
 using System;
@@ -17,13 +17,13 @@ namespace Gigya.Socialize.SDK
     {
         /// <summary>
         /// Use this method to verify the authenticity of a 
-        /// <a href="http://wiki.gigya.com/030_API_reference/020_REST_API/socialize.getUserInfo">socialize.getUserInfo</a> API method response,
+        /// <a href="https://developers.gigya.com/display/GD/socialize.getUserInfo+REST">socialize.getUserInfo</a> API method response,
         /// to make sure it is in fact originating from Gigya, and prevent fraud. 
         /// The "socialize.getUserInfo" API method response data include the following fields: 
         /// UID, signatureTimestamp (a timestamp) and UIDSignature (a cryptographic signature).
         /// Pass these fields as the corresponding parameters of this method, along with your partner's "Secret Key".
         /// Your secret key (provided in BASE64 encoding) is located at the bottom of the 
-        /// <a href="http://www.gigya.com/site/partners/wfsocapi.aspx#&amp;&amp;userstate=SiteSetup">Site Setup</a> page on Gigya's website.
+        /// <a href="https://console.gigya.com/site/partners/wfsocapi.aspx#&amp;&amp;userstate=SiteSetup">Site Setup</a> page on Gigya's website.
         /// The return value of the method indicates if the signature is valid (thus, originating from Gigya) or not.
         /// </summary>
         /// <param name="UID">pass the UID field returned by the "socialize.getUserInfo" API method response </param>
@@ -39,13 +39,13 @@ namespace Gigya.Socialize.SDK
 
         /// <summary>
         /// Use this method to verify the authenticity of a 
-        /// <a href="http://wiki.gigya.com/030_API_reference/020_REST_API/socialize.getFriendsInfo">socialize.getFriendsInfo</a> API 
+        /// <a href="https://developers.gigya.com/display/GD/socialize.getFriendsInfo+REST">socialize.getFriendsInfo</a> API 
         /// method response, to make sure it is in fact originating from Gigya, and prevent fraud. 
         /// The "socialize.getFriendsInfo" API method response data include the following fields: 
         /// UID, signatureTimestamp (a timestamp) and friendshipSignature (a cryptographic signature).
         /// Pass these fields as the corresponding parameters of this method, along with your partner's "Secret Key". Your secret 
         /// key (provided in BASE64 encoding) is located at the bottom of the 
-        /// <a href="http://www.gigya.com/site/partners/wfsocapi.aspx#&amp;&amp;userstate=SiteSetup">Site Setup</a> page on Gigya's website.
+        /// <a href="https://console.gigya.com/site/partners/wfsocapi.aspx#&amp;&amp;userstate=SiteSetup">Site Setup</a> page on Gigya's website.
         /// The return value of the method indicates if the signature is valid (thus, originating from Gigya) or not.
         /// </summary>
         /// <param name="UID">pass the UID field returned by the "socialize.getFriendsInfo" API method response </param>
@@ -141,6 +141,19 @@ namespace Gigya.Socialize.SDK
             string unsignedExpString = glt_cookie + "_" + expirationTimeUnix;
             string signedExpString = CalcSignature(unsignedExpString, secret); // sign the base string using the secret key
             string ret = expirationTimeUnix + '_' + signedExpString;   // define the cookie value
+
+            return ret;
+        }
+
+        public static string GetDynamicSessionSignatureUserSigned(string glt_cookie, int timeoutInSeconds, string userKey, string secret)
+        {
+            // cookie format: 
+            // <expiration time in unix time format>_<User Key>_BASE64(HMACSHA1(secret key, <login token>_<expiration time in unix time format>_<User Key>))
+
+            string expirationTimeUnix = (CurrentTimeMillis() / 1000 + timeoutInSeconds).ToString();
+            string unsignedExpString = glt_cookie + "_" + expirationTimeUnix + "_" + userKey;
+            string signedExpString = CalcSignature(unsignedExpString, secret); // sign the base string using the secret key
+            string ret = expirationTimeUnix + "_" + userKey + "_" + signedExpString;   // define the cookie value
 
             return ret;
         }
