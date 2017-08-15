@@ -1049,7 +1049,9 @@ namespace Gigya.Socialize.SDK
         public override string ToString()
         {
             SortedDictionary<string, object> obj = this.ToSortedDictionary();
-            string ret = new JavaScriptSerializer().Serialize(obj);
+            var serializer = new JavaScriptSerializer();
+            serializer.MaxJsonLength = (int)GSRequest.MaxResponseSize;
+            string ret = serializer.Serialize(obj);
             return ret;
         }
     }
