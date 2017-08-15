@@ -1,4 +1,7 @@
-﻿[Version 2.15.6]
+﻿[Version 2.15.7]
+* Removed Expect100Continue header from requests
+
+[Version 2.15.6]
 * Added a new parameter to GSRequest constructor - additionalHeaders.
 
 [Version 2.15.5]

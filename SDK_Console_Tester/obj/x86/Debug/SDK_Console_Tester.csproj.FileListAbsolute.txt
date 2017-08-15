@@ -1,8 +1,0 @@
-D:\dvlp\Github\DotNet\SDK_Console_Tester\bin\Debug\SDK_Console_Tester.exe
-D:\dvlp\Github\DotNet\SDK_Console_Tester\bin\Debug\SDK_Console_Tester.pdb
-D:\dvlp\Github\DotNet\SDK_Console_Tester\bin\Debug\GSCSharpSDK.dll
-D:\dvlp\Github\DotNet\SDK_Console_Tester\bin\Debug\NCalc.dll
-D:\dvlp\Github\DotNet\SDK_Console_Tester\bin\Debug\GSCSharpSDK.pdb
-D:\dvlp\Github\DotNet\SDK_Console_Tester\obj\x86\Debug\SDK_Console_Tester.csprojResolveAssemblyReference.cache
-D:\dvlp\Github\DotNet\SDK_Console_Tester\obj\x86\Debug\SDK_Console_Tester.exe
-D:\dvlp\Github\DotNet\SDK_Console_Tester\obj\x86\Debug\SDK_Console_Tester.pdb
