@@ -717,7 +717,7 @@ namespace Gigya.Socialize.SDK
             request.ContentLength = requestBody.Length;
             if (null != gsReq.additionalHeaders)
                 request.Headers.Add(gsReq.additionalHeaders);
-
+            request.ServicePoint.Expect100Continue = false;
             return request;
         }
 
