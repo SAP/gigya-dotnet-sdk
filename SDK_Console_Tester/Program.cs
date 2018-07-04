@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Threading;
 using Gigya.Socialize.SDK;
@@ -46,6 +47,7 @@ static class Program {
         public string   Host;
         public int      RequestTimeout = Timeout.Infinite;
         public bool     UseHttps = true;
+        public bool     SignRequests = true;
         public string   Extract;
         public string   ExtractPrefix;
         public Dictionary<string, string> Params = new Dictionary<string,string>();
@@ -112,17 +114,23 @@ static class Program {
             settings.RequestTimeout = tmpint;
         else if (arg == "http")
             settings.UseHttps = false;
-        else if (arg.StartsWith("extract=")) {
-            var p = arg.Substring("extract=".Length).Split(new char[] {'='}, StringSplitOptions.RemoveEmptyEntries);
-            if (p.Length == 1) {
+        else if (arg == "noSign")
+            settings.SignRequests = false;
+        else if (arg.StartsWith("extract="))
+        {
+            var p = arg.Substring("extract=".Length).Split(new char[] { '=' }, StringSplitOptions.RemoveEmptyEntries);
+            if (p.Length == 1)
+            {
                 settings.Extract = p[0];
                 settings.ExtractPrefix = string.Empty;
             }
-            else if (p.Length == 2) {
+            else if (p.Length == 2)
+            {
                 settings.Extract = p[1];
                 settings.ExtractPrefix = p[0] + '=';
             }
-            else {
+            else
+            {
                 Console.Error.WriteLine("extract example: 'extract=statusCode' or 'extract=PREFIX=statusCode'");
                 return false;
             }
@@ -224,7 +232,7 @@ static class Program {
         var procName = Environment.GetCommandLineArgs()[0].Substring(Environment.GetCommandLineArgs()[0].LastIndexOf('\\') + 1);
         Console.Error.WriteLine(@"
 Usage:  {0} [single|async|burst|func|input[=filename]]
-        apiKey= userKey= secret= method= [domain=] [host=] [https]
+        apiKey= userKey= secret= method= [domain=] [host=] [https] [noSign]
         [--requestParam=value ...] [extract=[prefix=]responseField]
         [pooling=true/false] [maxConns=] [timeout=] [noThreadBlock]
         [requests=] [periodInSecs=] [requestsRateExpr=]
@@ -279,6 +287,8 @@ Common parameters:
   [method=] The API method to call, e.g. socialize.getuserInfo. Mandatory.
 
   [http] uses http insetad of https.
+
+  [noSign] will not sign requests and send secret instead.
 
   [domain=] sends requests to this domain (e.g. ""eu1.gigya.com"") instead of
      the default domain (""gigya.com"").
@@ -351,10 +361,18 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
     }
 
 
+    static void ToggleSigning(this GSRequest request, bool sign)
+    {
+        if (!sign)
+            request.GetType().GetField("SignRequests", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(request, false);
+    }
+
+
     //========== single test ==================================================================
 
     static void PerformSyncSingle(Per_Request_Settings settings) {
         GSRequest request = new GSRequest(settings.ApiKey, settings.Secret, settings.Method, null, settings.UseHttps, settings.UserKey);
+        request.ToggleSigning(settings.SignRequests);
         request.APIDomain = settings.Domain ?? settings.Host ?? request.APIDomain;
         request.UseMethodDomain = settings.Host == null;
         foreach (var kvp in settings.Params)
@@ -374,6 +392,7 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
 
     static void PerformAsyncSingle(Per_Request_Settings settings) {
         GSRequest request = new GSRequest(settings.ApiKey, settings.Secret, settings.Method, null, settings.UseHttps, settings.UserKey);
+        request.ToggleSigning(settings.SignRequests);
         request.APIDomain = settings.Domain ?? settings.Host ?? request.APIDomain;
         request.UseMethodDomain = settings.Host == null;
         foreach (var kvp in settings.Params)
@@ -448,6 +467,7 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
 
     static void PerformAsyncRequest(int requestId, Per_Request_Settings settings) {
         GSRequest request = new GSRequest(settings.ApiKey, settings.Secret, settings.Method, null, settings.UseHttps, settings.UserKey);
+        request.ToggleSigning(settings.SignRequests);
         request.APIDomain = settings.Domain ?? settings.Host ?? request.APIDomain;
         request.UseMethodDomain = settings.Host == null;
         foreach (var kvp in settings.Params)
