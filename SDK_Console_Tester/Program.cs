@@ -4,10 +4,13 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using Gigya.Socialize.SDK;
+using Newtonsoft.Json.Linq;
 
 
 static class Program {
@@ -20,6 +23,7 @@ static class Program {
         burst,
         func,
         input,
+        servers,
     }
 
     static Operation gTestType;
@@ -35,6 +39,7 @@ static class Program {
     static bool?    gPrintAsyncStatus;
     static bool     gPrintResponses   = false;
     static bool     gPrintLog         = false;
+    static List<DnsEndPoint> gHostsFromConsul = new List<DnsEndPoint>();
 
 
     // Common parameters, can be overriden per request
@@ -73,11 +78,12 @@ static class Program {
                 ServicePointManager.ServerCertificateValidationCallback += (sender, certificate, chain, sslPolicyErrors) => true;
 
             switch (gTestType) {
-                case Operation.single: PerformSyncSingle(common_settings); break;
-                case Operation.async:  PerformAsyncSingle(common_settings); break;
-                case Operation.burst:  PrintConfig(); PerformAsyncBurst(common_settings); break;
-                case Operation.func:   PrintConfig(); PerformAsyncFunc(common_settings); break;
-                case Operation.input:  ProcessInput(common_settings); break;
+                case Operation.single:  PerformSyncSingle(common_settings); break;
+                case Operation.async:   PerformAsyncSingle(common_settings); break;
+                case Operation.burst:   PrintConfig(); PerformAsyncBurst(common_settings); break;
+                case Operation.func:    PrintConfig(); PerformAsyncFunc(common_settings); break;
+                case Operation.input:   ProcessInput(common_settings); break;
+                case Operation.servers: CallServers(common_settings); break;
             }
 
             return 0;
@@ -175,6 +181,10 @@ static class Program {
             }
             else if (a == "verifyCert")
                 gVerifyCert = true;
+            else if (a.StartsWith("consul=")) {
+                if (!TryFetchHostsFromConsul(a))
+                    return false;
+            }
             else if (Enum.TryParse(a, out testType) && testType.ToString() == a)
                 gTestType = testType;
             else {
@@ -185,6 +195,30 @@ static class Program {
         return true;
     }
 
+
+    // consul=eu1:eu1a-consul1/comments-legaso-st1,Gator-st1
+    static bool TryFetchHostsFromConsul(string arg)
+    {
+        string consulHost, dc;
+        string[] parts, services;
+
+        if (   (parts = arg.Substring("consul=".Length).Split('/')).Length != 2
+            || (services = parts[1].Split(',')).Length == 0
+            || services.Any(string.IsNullOrWhiteSpace)
+            || (parts = parts[0].Split(':')).Length != 2
+            || string.IsNullOrWhiteSpace(dc = parts[0])
+            || string.IsNullOrWhiteSpace(consulHost = parts[1]))
+            return false;
+
+        foreach (string service in services)
+        {
+            var response = JObject.Parse(new HttpClient().GetStringAsync($"http://{consulHost}:8500/v1/query/{service}/execute?dc={dc}").Result);
+            var nodes = response["Nodes"].Select(n => new DnsEndPoint(n["Node"]["Node"].ToString(), ushort.Parse(n["Service"]["Port"].ToString())));
+            gHostsFromConsul.AddRange(nodes);
+        }
+
+        return true;
+    }
 
 
     static bool ValidateArgs(Per_Request_Settings settings) {
@@ -231,7 +265,7 @@ static class Program {
     static void PrintUsage() {
         var procName = Environment.GetCommandLineArgs()[0].Substring(Environment.GetCommandLineArgs()[0].LastIndexOf('\\') + 1);
         Console.Error.WriteLine(@"
-Usage:  {0} [single|async|burst|func|input[=filename]]
+Usage:  Tester.exe single|async|burst|func|input[=filename]|servers
         apiKey= userKey= secret= method= [domain=] [host=] [https] [noSign]
         [--requestParam=value ...] [extract=[prefix=]responseField]
         [pooling=true/false] [maxConns=] [timeout=] [noThreadBlock]
@@ -250,7 +284,7 @@ Operations:
       specify tab-separated parameters. All common parameters (see below) are
       supported. Those parameters supplement or override the invocation
       parametes. For example:
-         {0} input secret=... https
+         Tester.exe input secret=... https
             (input line #1):   apiKey=...\tmethod=...\t--param=value
             (input line #2):  userKey=...\tmethod=...\t--param=value
       This will issue https requests to two different sites of a partner,
@@ -271,6 +305,9 @@ Operations:
       You can use tools such as graphsketch.com to develop a function. See
       ncalc.codeplex.com for supported operators. Useful to hit the server with
       variable loads, and test SDK connection pooling expiration behavior.
+
+  servers: Sends a copy of the request to each host obtained from Consul.
+      See --consul.
 
 
 Common parameters:
@@ -294,6 +331,12 @@ Common parameters:
      the default domain (""gigya.com"").
 
   [host=] sends requests to this host (e.g. ""web501"").
+
+  [consul=dc:<addr>/<serviceName>[,<serviceName>]...]
+    Fetches a list of hosts from Consul. For example:
+      us1:us1a-consul1/socialize-legacy-prod
+      eu1:eu1a-consul1/comments-legaso-st1,Gator-st1
+    Multiple consul params can be passed.
 
   [timeout=] defines how long to wait for a response, in milliseconds.
 
@@ -340,12 +383,19 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
     }
 
 
-    static void PrintFullOrPartialResponse(GSResponse res, Per_Request_Settings settings, int? request_id = null) {
+    static void PrintFullOrPartialResponse(GSRequest req, GSResponse res, Per_Request_Settings settings, int? request_id = null) {
         var sb = new StringBuilder();
         if (request_id.HasValue && (gPrintAsyncStatus == null || gPrintAsyncStatus.Value)) {
-            sb.AppendFormat("#{0,3}    RECV <<  {1}", request_id, res.GetErrorCode() == 0 ? "OK" : res.GetErrorMessage());
-            if (settings.Domain != null)
+            sb.AppendFormat("#{0,3}", request_id);
+            if (gTestType != Operation.servers)
+                sb.Append("    RECV <<");
+            if (!req.UseMethodDomain)
+                sb.AppendFormat($"  host={req.APIDomain}");
+            else if (settings.Domain != null)
                 sb.AppendFormat("  domain={0}", settings.Domain);
+            sb.Append("  errCode: ").Append(res.GetErrorCode()).Append("  ").Append(res.GetErrorMessage());
+            if (res.GetErrorCode() != 0 && res.GetString("callId", null) != null)
+                sb.Append("  callId:" + res.GetString("callId", null));
             sb.AppendLine();
         }
         if (gPrintLog)
@@ -353,7 +403,10 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
         else if (gPrintResponses)
             sb.AppendLine(res.GetResponseText()); // one atomic write to prevent multithreaded garbage
         else if (res.GetErrorCode() != 0)
-            sb.AppendFormat("{0} {1}\n", res.GetErrorCode(), res.GetErrorMessage());
+        {
+            if (gTestType != Operation.servers)
+                sb.AppendFormat("{0} {1}\n", res.GetErrorCode(), res.GetErrorMessage());
+        }
         else if (settings.Extract != null)
             foreach (var s in res.Get<string>(settings.Extract, true))
                 sb.AppendFormat("{0}{1}\n", settings.ExtractPrefix, s);
@@ -383,7 +436,7 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
             res = request.Send();
         else res = request.Send(settings.RequestTimeout);
 
-        PrintFullOrPartialResponse(res, settings);
+        PrintFullOrPartialResponse(request, res, settings);
     }
 
 
@@ -399,7 +452,7 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
             request.SetParam(kvp.Key, kvp.Value);
         var iar = request.BeginSend(null, null);
         if (iar.AsyncWaitHandle.WaitOne(settings.RequestTimeout))
-            PrintFullOrPartialResponse(request.EndSend(iar), settings);
+            PrintFullOrPartialResponse(request, request.EndSend(iar), settings);
         else Console.Error.WriteLine("TIMEOUT");
     }
 
@@ -494,7 +547,7 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
             if (response.GetErrorCode() != 0)
                 Interlocked.Increment(ref gFailures);
             else Interlocked.Increment(ref gSuccesses);
-            PrintFullOrPartialResponse(response, state.settings, state.request_id);
+            PrintFullOrPartialResponse(state.request, response, state.settings, state.request_id);
         }
         catch (Exception e) {
             Console.Error.WriteLine(e);
@@ -565,6 +618,32 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
         else if (o is float)
             return (float)o;
         else throw new Exception("Unsopported type '" + o.GetType().Name + "' in math function");
+    }
+
+
+
+    //========== multi-servers ==================================================================
+
+
+    static void CallServers(Per_Request_Settings settings)
+    {
+        gHostsFromConsul.Sort((a, b) => a.Host.CompareTo(b.Host));
+        responsesArrived = new CountdownEvent(gHostsFromConsul.Count);
+
+        int requestId = 0;
+        foreach (var server in gHostsFromConsul)
+        {
+            GSRequest request = new GSRequest(settings.ApiKey, settings.Secret, settings.Method, null, settings.UseHttps, settings.UserKey);
+            request.ToggleSigning(settings.SignRequests);
+            request.APIDomain = server.Host + ':' + server.Port;
+            request.UseMethodDomain = false;
+            foreach (var kvp in settings.Params)
+                request.SetParam(kvp.Key, kvp.Value);
+
+            request.BeginSend(OnResponseArrived, new Async_State { request = request, settings = settings, request_id = requestId++ });
+        }
+
+        responsesArrived.Wait();
     }
 
 
