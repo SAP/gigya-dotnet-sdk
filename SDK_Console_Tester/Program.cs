@@ -627,6 +627,9 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
 
     static void CallServers(Per_Request_Settings settings)
     {
+        if (settings.UseHttps)
+            gHostsFromConsul = gHostsFromConsul.Select(h => new DnsEndPoint(h.Host, h.Port + (443-80))).ToList();
+        gHostsFromConsul = gHostsFromConsul.Distinct().ToList();
         gHostsFromConsul.Sort((a, b) => a.Host.CompareTo(b.Host));
         responsesArrived = new CountdownEvent(gHostsFromConsul.Count);
 
