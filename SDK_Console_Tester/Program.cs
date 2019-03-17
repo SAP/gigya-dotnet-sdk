@@ -39,7 +39,9 @@ static class Program {
     static bool?    gPrintAsyncStatus;
     static bool     gPrintResponses   = false;
     static bool     gPrintLog         = false;
-    static List<DnsEndPoint> gHostsFromConsul = new List<DnsEndPoint>();
+
+    static List<(string consulHost, string dc, string[] services)> gConsulQueries
+        = new List<(string consulHost, string dc, string[] services)>();
 
 
     // Common parameters, can be overriden per request
@@ -69,6 +71,11 @@ static class Program {
 
     static int Main(string[] args) {
         try {
+            Console.OutputEncoding = Encoding.UTF8;
+            ServicePointManager.DefaultConnectionLimit = 100;
+            ServicePointManager.UseNagleAlgorithm = false;
+            ServicePointManager.Expect100Continue = false;
+
             if (args.Length == 0 || !ParseArgs(args, common_settings) || !ValidateArgs(common_settings)) {
                 PrintUsage();
                 return 1;
@@ -182,7 +189,7 @@ static class Program {
             else if (a == "verifyCert")
                 gVerifyCert = true;
             else if (a.StartsWith("consul=")) {
-                if (!TryFetchHostsFromConsul(a))
+                if (!TryParseConsulQuery(a))
                     return false;
             }
             else if (Enum.TryParse(a, out testType) && testType.ToString() == a)
@@ -197,7 +204,7 @@ static class Program {
 
 
     // consul=eu1:eu1a-consul1/comments-legaso-st1,Gator-st1
-    static bool TryFetchHostsFromConsul(string arg)
+    static bool TryParseConsulQuery(string arg)
     {
         string consulHost, dc;
         string[] parts, services;
@@ -210,13 +217,7 @@ static class Program {
             || string.IsNullOrWhiteSpace(consulHost = parts[1]))
             return false;
 
-        foreach (string service in services)
-        {
-            var response = JObject.Parse(new HttpClient().GetStringAsync($"http://{consulHost}:8500/v1/query/{service}/execute?dc={dc}").Result);
-            var nodes = response["Nodes"].Select(n => new DnsEndPoint(n["Node"]["Node"].ToString(), ushort.Parse(n["Service"]["Port"].ToString())));
-            gHostsFromConsul.AddRange(nodes);
-        }
-
+        gConsulQueries.Add((consulHost, dc, services));
         return true;
     }
 
@@ -627,14 +628,31 @@ Async-related parameters (for use with 'burst', 'func' and 'input' operations):
 
     static void CallServers(Per_Request_Settings settings)
     {
+        var queryTasks = gConsulQueries.SelectMany(query => query.services.Select(service => Task.Run(async () =>
+        {
+            string url = $"http://{query.consulHost}:8500/v1/query/{service}/execute?dc={query.dc}";
+            try {
+                var response = JObject.Parse(await new HttpClient().GetStringAsync(url));
+                var nodes = response["Nodes"].Select(n => new DnsEndPoint(n["Node"]["Node"].ToString(), ushort.Parse(n["Service"]["Port"].ToString()))).ToArray();
+                return nodes;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Error calling {url}", ex);
+            }
+        })));
+
+        Task.WhenAll(queryTasks).Wait();
+
+        List<DnsEndPoint> hosts = queryTasks.SelectMany(t => t.Result).ToList();
         if (settings.UseHttps)
-            gHostsFromConsul = gHostsFromConsul.Select(h => new DnsEndPoint(h.Host, h.Port + (443-80))).ToList();
-        gHostsFromConsul = gHostsFromConsul.Distinct().ToList();
-        gHostsFromConsul.Sort((a, b) => a.Host.CompareTo(b.Host));
-        responsesArrived = new CountdownEvent(gHostsFromConsul.Count);
+            hosts = hosts.Select(h => new DnsEndPoint(h.Host, h.Port + (443-80))).ToList();
+        hosts = hosts.Distinct().ToList();
+        hosts.Sort((a, b) => a.Host.CompareTo(b.Host));
+        responsesArrived = new CountdownEvent(hosts.Count);
 
         int requestId = 0;
-        foreach (var server in gHostsFromConsul)
+        foreach (var server in hosts)
         {
             GSRequest request = new GSRequest(settings.ApiKey, settings.Secret, settings.Method, null, settings.UseHttps, settings.UserKey);
             request.ToggleSigning(settings.SignRequests);
