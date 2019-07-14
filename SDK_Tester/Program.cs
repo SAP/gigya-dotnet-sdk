@@ -1,10 +1,7 @@
 ﻿using System;
-using System.Reflection;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
-using System.Web.Script.Serialization;
-using System.Text;
 using Gigya.Socialize.SDK;
 using System.Collections;
 using System.Diagnostics;
@@ -17,6 +14,7 @@ namespace SDK_Tester
         const string apiKey = "3_VhmtkuYIX72Jmmuxi1C4eRfjmO2CGnLu5YtcpCJuwpbec4hNkhStGDSm2T2sEuQj";
         const string secretKey = "AhtCX5+ke9FsTGLfhwnIZ6tVBV8F1ziVzXM0r/cSCXM=";
 
+        private static readonly SignedRequestTester SignedRequestTester = new SignedRequestTester();
 
         public static Form1 MainForm { get; set; }
 
@@ -27,6 +25,7 @@ namespace SDK_Tester
             //TestAsyncGSRequest();
             CastTester();
             GetUserInfoTester();
+            SignedRequestTester.Run();
         }
 
         public class MyClass

@@ -6,7 +6,6 @@ using System;
 using System.Text;
 using System.IO;
 using System.Net;
-using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Threading;
@@ -20,7 +19,7 @@ namespace Gigya.Socialize.SDK
     /// </summary>
     public class GSRequest
     {
-        public const String version = "2.15.7";
+        public const String version = "2.16.0";
 
         /// <summary>
         /// This flag tells the SDK to try and reuse connections to the gigya servers, in order to lower the overheads
@@ -43,15 +42,15 @@ namespace Gigya.Socialize.SDK
         public static int MaxConcurrentConnections
         {
             # region set/get
-            get { return maxConcurrentConnections; }
+            get { return _maxConcurrentConnections; }
             set
             {
-                if (maxConcurrentConnections != value)
+                if (_maxConcurrentConnections != value)
                 {
-                    maxConcurrentConnections = value;
+                    _maxConcurrentConnections = value;
                     // Note: existing requests will release the previous semaphore (they cache it). Creating this new
                     // semaphore can cause new requests to be queued temporarily, until existing requests are completed.
-                    semaphore = new Semaphore(value, value);
+                    _semaphore = new Semaphore(value, value);
                 }
             }
             #endregion
@@ -62,8 +61,8 @@ namespace Gigya.Socialize.SDK
         {
             get
             {
-                if (lastServicePointUsed != null)
-                    return lastServicePointUsed.CurrentConnections;
+                if (_lastServicePointUsed != null)
+                    return _lastServicePointUsed.CurrentConnections;
                 else return 0;
             }
         }
@@ -107,26 +106,31 @@ namespace Gigya.Socialize.SDK
         /// <summary>(For Gigya internal use)</summary>
         public bool UseMethodDomain = true;
 
+        #region Protected Members
+
+        protected readonly string UserKey;
+        protected readonly string ApiKey;
+        protected readonly string Method;
+        protected NameValueCollection AdditionalHeaders;
+        protected readonly GSLogger Logger = new GSLogger();
+
+        #endregion
+        
         #region Private Members
-        private string domain;
-        private string path;
-        private string method;
-        private string apiKey;
-        private string userKey;
-        private string secretKey;
-        private NameValueCollection additionalHeaders;
-        private GSObject dictionaryParams;
-        private bool useHTTPS;
-        private string format;
-        private GSLogger logger = new GSLogger();
-        private static string unreservedCharsstring = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~";
-        private static char[] unreservedChars;
-        private GSResponse immediateFailureResponse = null;
-        private GSResponse asyncResponse = null;
-        private static ServicePoint lastServicePointUsed = null;
-        private static int nonceCounter = 0;
-        private static int maxConcurrentConnections = 100;
-        private static Semaphore semaphore = new Semaphore(maxConcurrentConnections, maxConcurrentConnections);
+        private string _domain;
+        private string _path;
+        private readonly string _secretKey;
+        private readonly GSObject _dictionaryParams;
+        private readonly bool _useHttps;
+        private string _format;
+        private const string UnreservedCharsString = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.~";
+        private static readonly char[] UnreservedChars;
+        private GSResponse _immediateFailureResponse;
+        private GSResponse _asyncResponse;
+        private static ServicePoint _lastServicePointUsed;
+        private static int _nonceCounter;
+        private static int _maxConcurrentConnections = 100;
+        private static Semaphore _semaphore = new Semaphore(_maxConcurrentConnections, _maxConcurrentConnections);
 
         /// <summary>
         /// THIS FIELD IS FOR TESTING PRUPOSES ONLY, setting this field to false involves a security risk.
@@ -153,8 +157,8 @@ namespace Gigya.Socialize.SDK
         /// </summary>
         static GSRequest()
         {
-            unreservedChars = unreservedCharsstring.ToCharArray();
-            Array.Sort(unreservedChars);
+            UnreservedChars = UnreservedCharsString.ToCharArray();
+            Array.Sort(UnreservedChars);
         }
 
         /// <summary>
@@ -251,46 +255,46 @@ namespace Gigya.Socialize.SDK
             if (string.IsNullOrEmpty(apiMethod))
                 return;
 
-            this.apiKey = apiKey;
-            this.userKey = userKey;
-            this.secretKey = secretKey;
-            this.method = apiMethod;
-            this.useHTTPS = useHTTPS;
-            this.additionalHeaders = additionalHeaders;
-            this.dictionaryParams = gsObjParams == null ? new GSObject() : gsObjParams.Clone();
+            ApiKey = apiKey;
+            UserKey = userKey;
+            _secretKey = secretKey;
+            Method = apiMethod;
+            _useHttps = useHTTPS;
+            AdditionalHeaders = additionalHeaders;
+            _dictionaryParams = gsObjParams == null ? new GSObject() : gsObjParams.Clone();
 
             // Write to traceLog
-            logger.Write("apiMethod", apiMethod);
+            Logger.Write("apiMethod", apiMethod);
             if (secretKey != null)
             {
                 if (apiKey != null)
-                    logger.Write("apiKey", apiKey);
+                    Logger.Write("apiKey", apiKey);
                 if (userKey != null)
-                    logger.Write("userKey", userKey);
+                    Logger.Write("userKey", userKey);
             }
             else
             {
-                logger.Write("accessToken", apiKey);
+                Logger.Write("accessToken", apiKey);
             }
 
-            logger.Write("clientParams", dictionaryParams.ToJsonString());
+            Logger.Write("clientParams", _dictionaryParams.ToJsonString());
         }
 
 
-        private void BuildURI(string apiMethod)
+        private void BuildUri(string apiMethod)
         {
             if (apiMethod.StartsWith("/"))
                 apiMethod = apiMethod.Substring("/".Length);
 
-            if (apiMethod.IndexOf(".") == -1)
+            if (apiMethod.IndexOf(".", StringComparison.Ordinal) == -1)
             {
-                this.domain = UseMethodDomain ? "socialize." + this.APIDomain : this.APIDomain;
-                this.path = "/socialize." + apiMethod;
+                _domain = UseMethodDomain ? "socialize." + this.APIDomain : this.APIDomain;
+                _path = "/socialize." + apiMethod;
             }
             else
             {
-                this.domain = UseMethodDomain ? apiMethod.Split(new char[] { '\\', '.' })[0] + "." + this.APIDomain : this.APIDomain;
-                this.path = "/" + apiMethod;
+                _domain = UseMethodDomain ? apiMethod.Split(new char[] { '\\', '.' })[0] + "." + this.APIDomain : this.APIDomain;
+                _path = "/" + apiMethod;
             }
         }
 
@@ -307,7 +311,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="value">the value to set for the parameter</param>
         public void SetParam(string param, string value)
         {
-            this.dictionaryParams.Put(param, value);
+            this._dictionaryParams.Put(param, value);
         }
         /// <summary>
         ///  Associates the specified parameter with the specified value. 
@@ -318,7 +322,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="value">the value to set for the parameter</param>
         public void SetParam(string param, long value)
         {
-            this.dictionaryParams.Put(param, value);
+            this._dictionaryParams.Put(param, value);
         }
         /// <summary>
         ///  Associates the specified parameter with the specified value. 
@@ -329,7 +333,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="value">the value to set for the parameter</param>
         public void SetParam(string param, int value)
         {
-            this.dictionaryParams.Put(param, value);
+            this._dictionaryParams.Put(param, value);
         }
         /// <summary>
         ///  Associates the specified parameter with the specified value. 
@@ -340,7 +344,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="value">the value to set for the parameter</param>
         public void SetParam(string param, bool value)
         {
-            this.dictionaryParams.Put(param, value);
+            this._dictionaryParams.Put(param, value);
         }
         /// <summary>
         ///  Associates the specified parameter with the specified value. 
@@ -351,7 +355,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="value">the value to set for the parameter</param>
         public void SetParam(string param, GSObject value)
         {
-            this.dictionaryParams.Put(param, value);
+            this._dictionaryParams.Put(param, value);
         }
         /// <summary>
         ///  Associates the specified parameter with the specified value. 
@@ -362,7 +366,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="value">the value to set for the parameter</param>
         public void SetParam(string param, GSArray value)
         {
-            this.dictionaryParams.Put(param, value);
+            this._dictionaryParams.Put(param, value);
         }
         #endregion
 
@@ -372,7 +376,7 @@ namespace Gigya.Socialize.SDK
         /// <returns>the params field of this request.</returns>
         public GSObject GetParams()
         {
-            return this.dictionaryParams;
+            return this._dictionaryParams;
         }
 
         /// <summary>
@@ -391,26 +395,24 @@ namespace Gigya.Socialize.SDK
         /// <returns>a GSResponse object representing Gigya's response</returns>
         public GSResponse Send(int timeout)
         {
-            this.format = this.dictionaryParams.GetString("format", "json");
-
-            if (string.IsNullOrEmpty(this.method)
-                || (string.IsNullOrEmpty(this.apiKey) && string.IsNullOrEmpty(this.userKey))
-                || (!string.IsNullOrEmpty(this.userKey) && string.IsNullOrEmpty(this.secretKey)))
+            _format = _dictionaryParams.GetString("format", "json");
+            
+            if (!IsValidRequest())
             {
-                return new GSResponse(this.method, this.dictionaryParams, 400002, logger); // (Missing required parameter)
+                return new GSResponse(Method, _dictionaryParams, 400002, Logger); // (Missing required parameter)
             }
-
+            
             try
             {
                 // Set default params
-                this.SetParam("format", this.format);
-                this.SetParam("httpStatusCodes", "false");
+                SetParam("format", this._format);
+                SetParam("httpStatusCodes", "false");
 
-                BuildURI(this.method);
+                BuildUri(Method);
                 // Send request by HTTP POST
-                GSResponse resp = SendRequestAndRecoverFromExpiredConnections("POST", timeout);
+                var resp = SendRequestAndRecoverFromExpiredConnections("POST", timeout);
 
-                // If we received an error from the server indicating that our clock isn't syncronized with the server's,
+                // If we received an error from the server indicating that our clock isn't synchronized with the server's,
                 // we adjust the time correction by the time delta and perform one retry.
                 if (resp.GetErrorCode() == 403002 && resp.GetHeaders()["Date"] != null)
                 {
@@ -423,16 +425,16 @@ namespace Gigya.Socialize.SDK
             catch (WebException e)
             {
                 if (e.Status == WebExceptionStatus.Timeout)
-                    return new GSResponse(method, dictionaryParams, 504002, "Request Timeout", logger);
-                else return new GSResponse(method, dictionaryParams, 500, e.ToString(), logger);
+                    return new GSResponse(Method, _dictionaryParams, 504002, "Request Timeout", Logger);
+                return new GSResponse(Method, _dictionaryParams, 500, e.ToString(), Logger);
             }
             catch (FormatException)
             {
-                return new GSResponse(method, dictionaryParams, 400006, "Invalid parameter value: secret", logger);
+                return new GSResponse(Method, _dictionaryParams, 400006, "Invalid parameter value: secret", Logger);
             }
             catch (Exception ex)
             {
-                return new GSResponse(method, dictionaryParams, 500, ex.ToString(), logger);
+                return new GSResponse(Method, _dictionaryParams, 500, ex.ToString(), Logger);
             }
         }
 
@@ -446,11 +448,9 @@ namespace Gigya.Socialize.SDK
         /// </summary>
         public IAsyncResult BeginSend(AsyncCallback callback, object state)
         {
-            this.format = this.dictionaryParams.GetString("format", "json");
+            this._format = this._dictionaryParams.GetString("format", "json");
 
-            if (string.IsNullOrEmpty(this.method)
-                || (string.IsNullOrEmpty(this.apiKey) && string.IsNullOrEmpty(this.userKey))
-                || (!string.IsNullOrEmpty(this.userKey) && string.IsNullOrEmpty(this.secretKey)))
+            if (!IsValidRequest())
             {
                 // Missing required parameter
                 return ImmediateAsyncFailure(400002, null, callback, state);
@@ -460,22 +460,22 @@ namespace Gigya.Socialize.SDK
             try
             {
                 // Set default params
-                this.SetParam("format", this.format);
+                this.SetParam("format", this._format);
                 this.SetParam("httpStatusCodes", "false");
                 int sendRetries = 0;
 
-                BuildURI(this.method);
+                BuildUri(this.Method);
 
                 if (BlockWhenConnectionsExhausted)
                 {
-                    sem = semaphore; // cache it in case settings change and it is modified
+                    sem = _semaphore; // cache it in case settings change and it is modified
                     sem.WaitOne();
                 }
 
                 var reliableRequest = new GSAsyncReliableRequest(
 
                     // We pass a factory to generate requests
-                    (out HttpWebRequest request_, out byte[] requestBody_) => { request_ = PrepareHttpRequest(this, "POST", -1, out requestBody_); },
+                    (out HttpWebRequest request_, out byte[] requestBody_) => { request_ = PrepareHttpRequest("POST", -1, out requestBody_); },
 
                     // Once we got a response we create and store the GSResponse object. If we encounter error #403002, we correct the timestamp and
                     // resend the request once.
@@ -484,10 +484,8 @@ namespace Gigya.Socialize.SDK
                     // We pass our own callback that releases the semaphore if needed before calling back the user.
                     ar =>
                     {
-                        if (sem != null)
-                            sem.Release();
-                        if (callback != null)
-                            callback(ar);
+                        sem?.Release();
+                        callback?.Invoke(ar);
                     },
 
                     state);
@@ -498,18 +496,22 @@ namespace Gigya.Socialize.SDK
             }
             catch (FormatException)
             {
-                if (sem != null)
-                    sem.Release();
+                sem?.Release();
                 return ImmediateAsyncFailure(400006, "Invalid parameter value: secret", callback, state);
             }
             catch (Exception ex)
             {
-                if (sem != null)
-                    sem.Release();
+                sem?.Release();
                 return ImmediateAsyncFailure(500, EncodeJson(ex.ToString()), callback, state);
             }
         }
 
+        protected virtual bool IsValidRequest()
+        {
+            return !(string.IsNullOrEmpty(Method)
+                    || string.IsNullOrEmpty(ApiKey) && string.IsNullOrEmpty(UserKey)
+                    || !string.IsNullOrEmpty(UserKey) && string.IsNullOrEmpty(_secretKey));
+        }
 
 
         private bool ShouldResendRequest(GSAsyncRequest asyncReq, ref int sendRetries)
@@ -520,15 +522,15 @@ namespace Gigya.Socialize.SDK
                     && RecoverFromExpiredConnections
                     && sendRetries++ < asyncReq.Request.ServicePoint.CurrentConnections)
                     return true;
-                else asyncResponse = new GSResponse(this.method, dictionaryParams, 500, EncodeJson(asyncReq.Error.ToString()), logger);
+                else _asyncResponse = new GSResponse(this.Method, _dictionaryParams, 500, EncodeJson(asyncReq.Error.ToString()), Logger);
             else
             {
-                logger.Write("server", asyncReq.Response.Headers["x-server"]);
-                asyncResponse = new GSResponse(this.method, ExtractHeaders(asyncReq.Response.Headers), asyncReq.ResponseBody, logger);
+                Logger.Write("server", asyncReq.Response.Headers["x-server"]);
+                _asyncResponse = new GSResponse(this.Method, ExtractHeaders(asyncReq.Response.Headers), asyncReq.ResponseBody, Logger);
             }
-            if (asyncResponse.GetErrorCode() == 403002 && asyncResponse.GetHeaders()["Date"] != null)
+            if (_asyncResponse.GetErrorCode() == 403002 && _asyncResponse.GetHeaders()["Date"] != null)
             {
-                timeCorrection = (long)(DateTime.Parse(asyncResponse.GetHeaders()["Date"]) - DateTime.Now).TotalMilliseconds;
+                timeCorrection = (long)(DateTime.Parse(_asyncResponse.GetHeaders()["Date"]) - DateTime.Now).TotalMilliseconds;
                 if (sendRetries++ == 0)
                     return true;
             }
@@ -536,13 +538,11 @@ namespace Gigya.Socialize.SDK
         }
 
 
-
         IAsyncResult ImmediateAsyncFailure(int errorCode, string errorMessage, AsyncCallback callback, object state)
         {
-            immediateFailureResponse = new GSResponse(method, dictionaryParams, errorCode, errorMessage, logger);
+            _immediateFailureResponse = new GSResponse(Method, _dictionaryParams, errorCode, errorMessage, Logger);
             _asyncResult = new GSAsync(state, new ManualResetEvent(true), true, true);
-            if (callback != null)
-                callback(_asyncResult);
+            callback?.Invoke(_asyncResult);
             return _asyncResult;
         }
 
@@ -564,10 +564,10 @@ namespace Gigya.Socialize.SDK
 
             // If an invalid call to BeginSend() was made, we previously stored a locally-generated reply with error
             // details and now return it to the user (as if it was a real reply from the server).
-            if (immediateFailureResponse != null)
-                return immediateFailureResponse;
+            if (_immediateFailureResponse != null)
+                return _immediateFailureResponse;
 
-            else return asyncResponse;
+            else return _asyncResponse;
         }
 
         /// <summary>
@@ -577,7 +577,7 @@ namespace Gigya.Socialize.SDK
         public void Abort()
         {
             if (_asyncResult == null) throw new InvalidOperationException("Cannot call Abort before calling BeginSend");
-            if (immediateFailureResponse == null)
+            if (_immediateFailureResponse == null)
                 ((GSAsyncReliableRequest)_asyncResult).GSAsyncRequest.Request.Abort();
         }
 
@@ -626,7 +626,7 @@ namespace Gigya.Socialize.SDK
             for (int i = 0; i < value.Length; i++)
             {
                 char symbol = value[i];
-                if (Array.BinarySearch<char>(unreservedChars, symbol) >= 0)
+                if (Array.BinarySearch<char>(UnreservedChars, symbol) >= 0)
                     result.Append(symbol);
                 else
                 {
@@ -644,63 +644,25 @@ namespace Gigya.Socialize.SDK
 
         #region Private Methods
 
-        private static HttpWebRequest PrepareHttpRequest(GSRequest gsReq, string httpMethod, int timeout, out byte[] requestBody)
+        private HttpWebRequest PrepareHttpRequest(string httpMethod, int timeout, out byte[] requestBody)
         {
-            gsReq.SetParam("sdk", "dotnet_" + version);
+            SetParam("sdk", "dotnet_" + version);
             // Set Protocol and URI
-            string protocol =
-                (gsReq.useHTTPS || gsReq.secretKey == null || !gsReq.SignRequests) ? "https" : "http";
-            string resourceURI = protocol + "://" + gsReq.domain + gsReq.path;
+            var protocol =
+                _useHttps || _secretKey == null || !SignRequests ? "https" : "http";
+            var resourceUri = protocol + "://" + _domain + _path;
 
-            if (gsReq.secretKey == null)
-            {
-                gsReq.SetParam("oauth_token", gsReq.apiKey);
-            }
-            else // Use apiKey and sign the request using the secretKey
-            {
-                if (gsReq.apiKey != null)
-                    gsReq.SetParam("apiKey", gsReq.apiKey);
-                if (gsReq.userKey != null)
-                    gsReq.SetParam("userKey", gsReq.userKey);
+            SetRequiredParamsAndSign(httpMethod, resourceUri);
 
-                // Set Timestamp and Nonce
-                long currTime = SigUtils.CurrentTimeMillis() + timeCorrection;
-                string nonce = DateTime.Now.ToFileTime().ToString() + "_" + (Interlocked.Increment(ref nonceCounter)).ToString();
-
-                // Set params. DO THIS *BEFORE* CALCULATING THE SIGNATURE 
-
-                if (gsReq.SignRequests)//Parameter needed only for signature.
-                {
-                    string timestamp = (currTime / 1000).ToString();
-                    gsReq.SetParam("timestamp", timestamp);
-                    gsReq.SetParam("nonce", nonce);
-                }
-
-                // Calculate signature. DO THIS ONLY *AFTER* PUTTING ALL OTHER PARAMS IN DICTIONARY
-                gsReq.dictionaryParams.Remove("sig"); // In case we attempted to send that request already
-                string basestring = SigUtils.CalcOAuth1Basestring(httpMethod, resourceURI, gsReq.dictionaryParams);
-                gsReq.logger.Write("baseString", basestring);
-
-                if (gsReq.SignRequests)
-                {
-                    string signature = SigUtils.CalcSignature(basestring, gsReq.secretKey);
-                    gsReq.SetParam("sig", signature);
-                }
-                else//Send secret key explicitly.
-                {
-                    gsReq.SetParam("secret", gsReq.secretKey);
-                }
-            }
-
-            gsReq.logger.Write("serverParams", gsReq.dictionaryParams);
+            Logger.Write("serverParams", _dictionaryParams);
             // Build the query string from the dictionary
-            string data = GSRequest.BuildQS(false /*dont add question mark*/, gsReq.dictionaryParams);
+            var data = BuildQS(false /*dont add question mark*/, _dictionaryParams);
 
-            gsReq.logger.Write("URL", resourceURI);
-            gsReq.logger.Write("postData", data);
+            Logger.Write("URL", resourceUri);
+            Logger.Write("postData", data);
 
-            // Create HttpRequset
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(resourceURI);
+            // Create HttpRequest
+            var request = (HttpWebRequest)WebRequest.Create(resourceUri);
             request.Timeout = timeout;
             request.AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip;
             request.ContentType = "application/x-www-form-urlencoded";
@@ -709,16 +671,64 @@ namespace Gigya.Socialize.SDK
             if (EnableConnectionPooling)
             {
                 request.Headers["X-Connection"] = "Keep-Alive";
-                request.ServicePoint.ConnectionLimit = maxConcurrentConnections;
+                request.ServicePoint.ConnectionLimit = _maxConcurrentConnections;
                 request.ServicePoint.MaxIdleTime = 180000;
             }
-            lastServicePointUsed = request.ServicePoint;
+            _lastServicePointUsed = request.ServicePoint;
             requestBody = Encoding.UTF8.GetBytes(data);
             request.ContentLength = requestBody.Length;
-            if (null != gsReq.additionalHeaders)
-                request.Headers.Add(gsReq.additionalHeaders);
+            if (null != AdditionalHeaders)
+                request.Headers.Add(AdditionalHeaders);
             request.ServicePoint.Expect100Continue = false;
             return request;
+        }
+
+        protected virtual void SetRequiredParamsAndSign(string httpMethod, string resourceUri)
+        {
+            if (_secretKey == null)
+            {
+                SetParam("oauth_token", ApiKey);
+            }
+            else // Use apiKey and sign the request using the secretKey
+            {
+                if (ApiKey != null)
+                    SetParam("apiKey", ApiKey);
+                if (UserKey != null)
+                    SetParam("userKey", UserKey);
+            }
+            
+            Sign(httpMethod, resourceUri);
+        }
+
+        protected virtual void Sign(string httpMethod, string resourceUri)
+        {
+            // Set Timestamp and Nonce
+            var currTime = SigUtils.CurrentTimeMillis() + timeCorrection;
+            var nonce = DateTime.Now.ToFileTime() + "_" + Interlocked.Increment(ref _nonceCounter);
+
+            // Set params. DO THIS *BEFORE* CALCULATING THE SIGNATURE 
+
+            if (SignRequests)//Parameter needed only for signature.
+            {
+                var timestamp = (currTime / 1000).ToString();
+                SetParam("timestamp", timestamp);
+                SetParam("nonce", nonce);
+            }
+
+            // Calculate signature. DO THIS ONLY *AFTER* PUTTING ALL OTHER PARAMS IN DICTIONARY
+            _dictionaryParams.Remove("sig"); // In case we attempted to send that request already
+            var baseString = SigUtils.CalcOAuth1Basestring(httpMethod, resourceUri, _dictionaryParams);
+            Logger.Write("baseString", baseString);
+
+            if (SignRequests)
+            {
+                var signature = SigUtils.CalcSignature(baseString, _secretKey);
+                SetParam("sig", signature);
+            }
+            else //Send secret key explicitly.
+            {
+                SetParam("secret", _secretKey);
+            }
         }
 
 
@@ -756,11 +766,11 @@ namespace Gigya.Socialize.SDK
         private GSResponse SendRequest(string httpMethod, int timeout, out HttpWebRequest request)
         {
             byte[] form_body;
-            request = PrepareHttpRequest(this, httpMethod, timeout, out form_body);
+            request = PrepareHttpRequest(httpMethod, timeout, out form_body);
             if (Proxy != null) request.Proxy = Proxy;
 
             // Write content to the request.
-            using (Stream stream = request.GetRequestStream())
+            using (var stream = request.GetRequestStream())
             {
                 stream.Write(form_body, 0, form_body.Length);
                 stream.Close();
@@ -769,9 +779,9 @@ namespace Gigya.Socialize.SDK
             // Get HttpResponse
             using (var webResponse = (HttpWebResponse)request.GetResponse())
             {
-                logger.Write("server", webResponse.Headers["x-server"]);
+                Logger.Write("server", webResponse.Headers["x-server"]);
                 using (StreamReader sr = new StreamReader(webResponse.GetResponseStream(), Encoding.GetEncoding(webResponse.CharacterSet ?? "utf-8")))
-                    return new GSResponse(method, ExtractHeaders(webResponse.Headers), sr.ReadToEnd(), logger);
+                    return new GSResponse(Method, ExtractHeaders(webResponse.Headers), sr.ReadToEnd(), Logger);
             }
         }
 
