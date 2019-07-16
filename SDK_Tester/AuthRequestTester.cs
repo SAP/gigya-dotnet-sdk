@@ -3,7 +3,7 @@ using Gigya.Socialize.SDK;
 
 namespace SDK_Tester
 {
-    public class SignedRequestTester
+    public class AuthRequestTester
     {
         private const string ApiDomain = "il1-st7.gigya.com";
         
@@ -42,7 +42,7 @@ mBDN/QKBgAMUsxYhe4wnG4JjkMeb7kJNnr0jVdMgga3nwlw8QUb9C+oRpQIBZb9v
         public void Run()
         {
             const string method = "accounts.getAccountInfo";
-            var req = new GSSignedRequest(
+            var req = new GSAuthRequest(
                 ApiKey, 
                 UserKey,  
                 PrivateKey, 
