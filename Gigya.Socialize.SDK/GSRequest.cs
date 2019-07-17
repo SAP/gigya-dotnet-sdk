@@ -652,7 +652,9 @@ namespace Gigya.Socialize.SDK
                 _useHttps || _secretKey == null || !SignRequests ? "https" : "http";
             var resourceUri = protocol + "://" + _domain + _path;
 
-            SetRequiredParamsAndSign(httpMethod, resourceUri);
+            SetRequiredParams(httpMethod, resourceUri);
+            
+            Sign(httpMethod, resourceUri);
 
             Logger.Write("serverParams", _dictionaryParams);
             // Build the query string from the dictionary
@@ -683,7 +685,7 @@ namespace Gigya.Socialize.SDK
             return request;
         }
 
-        protected virtual void SetRequiredParamsAndSign(string httpMethod, string resourceUri)
+        protected virtual void SetRequiredParams(string httpMethod, string resourceUri)
         {
             if (_secretKey == null)
             {
@@ -696,8 +698,6 @@ namespace Gigya.Socialize.SDK
                 if (UserKey != null)
                     SetParam("userKey", UserKey);
             }
-            
-            Sign(httpMethod, resourceUri);
         }
 
         protected virtual void Sign(string httpMethod, string resourceUri)

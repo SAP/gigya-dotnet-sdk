@@ -23,8 +23,8 @@ namespace SDK_Tester
         {
             //RunGUITester();
             //TestAsyncGSRequest();
-            CastTester();
-            GetUserInfoTester();
+//            CastTester();
+//            GetUserInfoTester();
             AuthRequestTester.Run();
         }
 
