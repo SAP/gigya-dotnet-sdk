@@ -59,7 +59,7 @@ mBDN/QKBgAMUsxYhe4wnG4JjkMeb7kJNnr0jVdMgga3nwlw8QUb9C+oRpQIBZb9v
 
             var response = res.GetData<UserInfoResponse>();
             
-            Debug.Assert(new GSArray(response.emails.unverified).GetString(0) == "a@a.com");
+            Debug.Assert(new GSArray(response.emails?.unverified).GetString(0) == "a@a.com");
         }
 
         public class UserInfoResponse

@@ -34,7 +34,7 @@ namespace Gigya.Socialize.SDK
         {
             if (userKey == null)
             {
-                Logger.Write(new MissingFieldException("Signed request must have userKey"));
+                Logger.Write(new MissingFieldException("Authorized request must have userKey"));
                 return;
             }
             _privateKey = privateKey;
@@ -42,15 +42,13 @@ namespace Gigya.Socialize.SDK
 
         protected override bool IsValidRequest()
         {
-            return !string.IsNullOrEmpty(Method);
+            return !string.IsNullOrEmpty(Method) && !string.IsNullOrEmpty(UserKey);
         }
         
-        protected override void SetRequiredParamsAndSign(string httpMethod, string resourceUri)
+        protected override void SetRequiredParams(string httpMethod, string resourceUri)
         {
             if (ApiKey != null)
                 SetParam("apiKey", ApiKey);
-
-            Sign(httpMethod, resourceUri);
         }
 
         protected override void Sign(string httpMethod, string resourceUri)
