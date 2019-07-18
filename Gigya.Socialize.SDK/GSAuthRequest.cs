@@ -28,7 +28,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="clientParams">The request parameters</param>
         /// <param name="additionalHeaders">A collection of additional headers for the HTTP request.</param>
         /// <param name="proxy">Proxy for the HTTP request.</param>
-        public GSAuthRequest(string apiKey, string userKey, string privateKey, string apiMethod, object clientParams = null,
+        public GSAuthRequest(string userKey, string privateKey, string apiKey, string apiMethod, object clientParams = null,
             NameValueCollection additionalHeaders = null, IWebProxy proxy = null)
             : base(apiKey, null, apiMethod, clientParams, true, userKey, additionalHeaders, proxy)
         {
