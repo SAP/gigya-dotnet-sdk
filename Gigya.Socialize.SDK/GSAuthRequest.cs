@@ -14,15 +14,15 @@ namespace Gigya.Socialize.SDK
 
         private const string JwtName = "JWT";
         
-        private const string H_alg = "SHA256";
+        private const string HAlg = "SHA256";
 
         /// <summary>
-        /// Constructs a request using an apiKey and secretKey.
-        /// Suitable for calling our old REST API
+        /// Constructs a request using a userKey and privateKey
+        /// Suitable for calling global sites REST API
         /// </summary>
-        /// <param name="apiKey">Gigya's API key obtained from Site-Setup page on the Gigya website</param>
         /// <param name="userKey">An administrative user's key.</param>
         /// <param name="privateKey">An administrative user's private key (PEM). usually read from file</param>
+        /// <param name="apiKey">Gigya's API key obtained from Site-Setup page on the Gigya website</param>
         /// <param name="apiMethod">The API method (including namespace) to call. For example: socialize.getUserInfo
         /// If namespaces is not supplied "socialize" is assumed</param>
         /// <param name="clientParams">The request parameters</param>
@@ -82,7 +82,7 @@ namespace Gigya.Socialize.SDK
 
             var rsa = RsaUtils.DecodeRsaPrivateKey(_privateKey);
 
-            var signature = rsa.SignData(Encoding.UTF8.GetBytes(baseString), H_alg);
+            var signature = rsa.SignData(Encoding.UTF8.GetBytes(baseString), HAlg);
 
             var signatureString = Convert.ToBase64String(signature);
 
