@@ -43,9 +43,9 @@ mBDN/QKBgAMUsxYhe4wnG4JjkMeb7kJNnr0jVdMgga3nwlw8QUb9C+oRpQIBZb9v
         {
             const string method = "accounts.getAccountInfo";
             var req = new GSAuthRequest(
-                ApiKey, 
                 UserKey,  
                 PrivateKey, 
+                ApiKey,
                 method,
                 new
                 {
