@@ -5,7 +5,7 @@ namespace SDK_Tester
 {
     public class AuthRequestTester
     {
-        private const string ApiDomain = "il1-st7.gigya.com";
+        private const string ApiDomain = "il1-st12.gigya.com";
         
         private const string ApiKey = "3_iC1Ys3bom_XB1bKlO65ShCrOWFfHVC4FeI5uS9ra2WM_BXb6Uu-pOge2TtR6y_-1";
         private const string UserKey = "AMzUkXsKaA3Q";

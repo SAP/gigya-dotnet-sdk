@@ -10,12 +10,6 @@ namespace Gigya.Socialize.SDK
     {
         private readonly string _privateKey;
 
-        private const string Algorithm = "RS256";
-
-        private const string JwtName = "JWT";
-        
-        private const string HAlg = "SHA256";
-
         /// <summary>
         /// Constructs a request using a userKey and privateKey
         /// Suitable for calling global sites REST API
@@ -45,7 +39,7 @@ namespace Gigya.Socialize.SDK
             return !string.IsNullOrEmpty(Method) && !string.IsNullOrEmpty(UserKey);
         }
         
-        protected override void SetRequiredParams(string httpMethod, string resourceUri)
+        protected override void SetDefaultParams(string httpMethod, string resourceUri)
         {
             if (ApiKey != null)
                 SetParam("apiKey", ApiKey);
@@ -63,40 +57,13 @@ namespace Gigya.Socialize.SDK
                 Logger.Write(new MissingFieldException("Failed to sign request, missing privateKey"));
                 return;
             }
-            
-            var header = new GSObject(new
-            {
-                alg = Algorithm,
-                typ = JwtName,
-                kid = UserKey                
-            });
-
-            var epochTime = new DateTime(1970, 1, 1);
-            var issued = (long)DateTime.UtcNow.Subtract(epochTime).TotalSeconds;
-            var payload = new GSObject(new
-            {
-                iat = issued,
-                jti = Guid.NewGuid().ToString()
-            });
-            
-            var headerBytes = Encoding.UTF8.GetBytes(header.ToJsonString());
-            var payloadBytes = Encoding.UTF8.GetBytes(payload.ToJsonString());
-
-            var baseString = string.Join(".",
-                new[] {Convert.ToBase64String(headerBytes), Convert.ToBase64String(payloadBytes)});
-
-            var rsa = RsaUtils.DecodeRsaPrivateKey(_privateKey);
-
-            var signature = rsa.SignData(Encoding.UTF8.GetBytes(baseString), HAlg);
-
-            var signatureString = Convert.ToBase64String(signature);
 
             if (null == AdditionalHeaders)
             {
                 AdditionalHeaders = new NameValueCollection();
             }
 
-            AdditionalHeaders["Authorization"] = "Bearer " + string.Join(".", new []{ baseString, signatureString});
+            AdditionalHeaders["Authorization"] = SigUtils.CalcAuthorizationBearer(UserKey, _privateKey);
         }
     }
 }
