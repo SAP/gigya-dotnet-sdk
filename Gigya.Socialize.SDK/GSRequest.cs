@@ -652,7 +652,7 @@ namespace Gigya.Socialize.SDK
                 _useHttps || _secretKey == null || !SignRequests ? "https" : "http";
             var resourceUri = protocol + "://" + _domain + _path;
 
-            SetRequiredParams(httpMethod, resourceUri);
+            SetDefaultParams(httpMethod, resourceUri);
             
             Sign(httpMethod, resourceUri);
 
@@ -685,7 +685,7 @@ namespace Gigya.Socialize.SDK
             return request;
         }
 
-        protected virtual void SetRequiredParams(string httpMethod, string resourceUri)
+        protected virtual void SetDefaultParams(string httpMethod, string resourceUri)
         {
             if (_secretKey == null)
             {
