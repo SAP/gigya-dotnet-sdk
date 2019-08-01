@@ -58,6 +58,11 @@ namespace Gigya.Socialize.SDK
                 Logger.Write(new MissingFieldException("Failed to sign request, missing userKey"));
                 return;
             }
+            if (_privateKey == null)
+            {
+                Logger.Write(new MissingFieldException("Failed to sign request, missing privateKey"));
+                return;
+            }
             
             var header = new GSObject(new
             {
