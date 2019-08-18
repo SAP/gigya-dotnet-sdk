@@ -646,13 +646,14 @@ namespace Gigya.Socialize.SDK
 
         private HttpWebRequest PrepareHttpRequest(string httpMethod, int timeout, out byte[] requestBody)
         {
-            SetParam("sdk", "dotnet_" + version);
             // Set Protocol and URI
             var protocol =
                 _useHttps || _secretKey == null || !SignRequests ? "https" : "http";
             var resourceUri = protocol + "://" + _domain + _path;
 
             SetDefaultParams(httpMethod, resourceUri);
+            
+            SetParam("sdk", "dotnet_" + version);
             
             Sign(httpMethod, resourceUri);
 
