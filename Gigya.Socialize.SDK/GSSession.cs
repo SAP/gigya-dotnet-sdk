@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2011 Gigya, Inc.
- * Version 2.15.7
+ * Version 2.16.0
  */
 
 
