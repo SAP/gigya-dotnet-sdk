@@ -1,11 +1,12 @@
 ﻿/*
  * Copyright (C) 2011 Gigya, Inc.
- * Version 2.15.7
+ * Version 2.16.0
  */
 
 using System;
 using System.Text;
 using System.Security.Cryptography;
+using Gigya.Socialize.SDK.Internals;
 
 namespace Gigya.Socialize.SDK 
 {
@@ -156,6 +157,42 @@ namespace Gigya.Socialize.SDK
             string ret = expirationTimeUnix + "_" + userKey + "_" + signedExpString;   // define the cookie value
 
             return ret;
+        }
+
+        public static string CalcAuthorizationBearer(string userKey, string privateKey)
+        {
+            const string algorithm = "RS256";
+            const string jwtName = "JWT";
+            const string hAlg = "SHA256";
+            
+            var header = new GSObject(new
+            {
+                alg = algorithm,
+                typ = jwtName,
+                kid = userKey                
+            });
+
+            var epochTime = new DateTime(1970, 1, 1);
+            var issued = (long)DateTime.UtcNow.Subtract(epochTime).TotalSeconds;
+            var payload = new GSObject(new
+            {
+                iat = issued,
+                jti = Guid.NewGuid().ToString()
+            });
+            
+            var headerBytes = Encoding.UTF8.GetBytes(header.ToJsonString());
+            var payloadBytes = Encoding.UTF8.GetBytes(payload.ToJsonString());
+
+            var baseString = string.Join(".",
+                new[] {Convert.ToBase64String(headerBytes), Convert.ToBase64String(payloadBytes)});
+
+            var rsa = RsaUtils.DecodeRsaPrivateKey(privateKey);
+
+            var signature = rsa.SignData(Encoding.UTF8.GetBytes(baseString), hAlg);
+
+            var signatureString = Convert.ToBase64String(signature);
+            
+            return "Bearer " + string.Join(".", new []{ baseString, signatureString});
         }
     }
 }

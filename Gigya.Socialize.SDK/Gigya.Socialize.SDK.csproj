@@ -54,6 +54,8 @@
     <Compile Include="GSRequest.cs" />
     <Compile Include="GSResponse.cs" />
     <Compile Include="GSSession.cs" />
+    <Compile Include="GSAuthRequest.cs" />
+    <Compile Include="Internals\RSAUtils.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="SigUtils.cs" />
   </ItemGroup>
