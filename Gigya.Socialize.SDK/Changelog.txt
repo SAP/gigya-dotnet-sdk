@@ -1,4 +1,7 @@
-﻿[Version 2.15.7]
+﻿[Version 2.16.0]
+* Added GSSignerRequest class for requests signed with jwt authorization header
+
+[Version 2.15.7]
 * Removed Expect100Continue header from requests
 
 [Version 2.15.6]
