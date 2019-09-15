@@ -13,8 +13,8 @@ namespace Gigya.Socialize.SDK.Internals
         {
             var key = Convert.FromBase64String(privateKey
                 .Replace("\r\n","")
-                .TrimStart(KeyHeader.ToCharArray())
-                .TrimEnd(KeyFooter.ToCharArray()));
+                .Replace(KeyHeader, "")
+                .Replace(KeyFooter, ""));
 
             var mem = new MemoryStream(key);
             var bin = new BinaryReader(mem);
