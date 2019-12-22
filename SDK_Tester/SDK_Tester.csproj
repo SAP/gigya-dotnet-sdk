@@ -78,7 +78,6 @@
     <Compile Include="ResponseViewer.designer.cs">
       <DependentUpon>ResponseViewer.cs</DependentUpon>
     </Compile>
-    <Compile Include="SigUtilsTests.cs" />
     <Compile Include="XmlComparer.cs" />
   </ItemGroup>
   <ItemGroup>
