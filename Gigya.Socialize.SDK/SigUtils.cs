@@ -4,6 +4,7 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Security.Cryptography;
 using Gigya.Socialize.SDK.Internals;
@@ -159,7 +160,7 @@ namespace Gigya.Socialize.SDK
             return ret;
         }
 
-        public static string CalcAuthorizationBearer(string userKey, string privateKey)
+        public static string CalcAuthorizationBearer(string userKey, string privateKey, bool oneTime = true)
         {
             const string algorithm = "RS256";
             const string jwtName = "JWT";
@@ -177,9 +178,9 @@ namespace Gigya.Socialize.SDK
             var payload = new GSObject(new
             {
                 iat = issued,
-                jti = Guid.NewGuid().ToString()
+                jti = oneTime ? Guid.NewGuid().ToString() : null
             });
-            
+
             var headerBytes = Encoding.UTF8.GetBytes(header.ToJsonString());
             var payloadBytes = Encoding.UTF8.GetBytes(payload.ToJsonString());
 
@@ -193,6 +194,18 @@ namespace Gigya.Socialize.SDK
             var signatureString = Convert.ToBase64String(signature);
             
             return "Bearer " + string.Join(".", new []{ baseString, signatureString});
+        }
+
+        /// <summary>
+        /// Validate JWT signature and issued at timestamp for tokens obtained from accounts.getJWT endpoint.
+        /// </summary>
+        /// <param name="jwt">Id token</param>
+        /// <param name="apiDomain">Api domain</param>
+        /// <returns> null - validation failed. A claims dictionary if validation successful.</returns>
+        /// 
+        public static IDictionary<string, string> ValidateSignature(string jwt, string apiDomain)
+        {
+            return JwtUtils.ValidateSignature(jwt, apiDomain);
         }
     }
 }

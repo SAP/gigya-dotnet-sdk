@@ -22,6 +22,9 @@ using System.Runtime.InteropServices;
 // The following GUID is for the ID of the typelib if this project is exposed to COM
 [assembly: Guid("9cc5e9ec-0b28-4dd9-92db-d7311fcc539d")]
 
+
+[assembly: InternalsVisibleTo("Gigya.Socialize.SDK.Jwt.UnitTests")]
+
 // Version information for an assembly consists of the following four values:
 //
 //      Major Version
