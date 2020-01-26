@@ -4,11 +4,12 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Text;
 using System.Security.Cryptography;
 using Gigya.Socialize.SDK.Internals;
 
-namespace Gigya.Socialize.SDK 
+namespace Gigya.Socialize.SDK
 {
     /// <summary>
     /// This class is a utility class with static methods for calculating and validating cryptographic signatures.
@@ -106,7 +107,7 @@ namespace Gigya.Socialize.SDK
 
             // Create a sorted list of query parameters
             StringBuilder querystring = new StringBuilder();
-            
+
             foreach (string key in requestParams.GetKeys())
             {
                 if (requestParams.GetString(key) != null)
@@ -120,9 +121,9 @@ namespace Gigya.Socialize.SDK
             if (querystring.Length > 0) querystring.Length--;	// remove the last ampersand
 
             // Construct the base string from the HTTP method, the URL and the parameters 
-            string basestring = 
-                httpMethod.ToUpperInvariant() + "&" + 
-                GSRequest.UrlEncode(normalizedUrlSB.ToString()) + "&" + 
+            string basestring =
+                httpMethod.ToUpperInvariant() + "&" +
+                GSRequest.UrlEncode(normalizedUrlSB.ToString()) + "&" +
                 GSRequest.UrlEncode(querystring.ToString());
             return basestring;
 
@@ -164,12 +165,12 @@ namespace Gigya.Socialize.SDK
             const string algorithm = "RS256";
             const string jwtName = "JWT";
             const string hAlg = "SHA256";
-            
+
             var header = new GSObject(new
             {
                 alg = algorithm,
                 typ = jwtName,
-                kid = userKey                
+                kid = userKey
             });
 
             var epochTime = new DateTime(1970, 1, 1);
@@ -179,20 +180,31 @@ namespace Gigya.Socialize.SDK
                 iat = issued,
                 jti = Guid.NewGuid().ToString()
             });
-            
+
             var headerBytes = Encoding.UTF8.GetBytes(header.ToJsonString());
             var payloadBytes = Encoding.UTF8.GetBytes(payload.ToJsonString());
 
             var baseString = string.Join(".",
-                new[] {Convert.ToBase64String(headerBytes), Convert.ToBase64String(payloadBytes)});
+                new[] { Convert.ToBase64String(headerBytes), Convert.ToBase64String(payloadBytes) });
 
             var rsa = RsaUtils.DecodeRsaPrivateKey(privateKey);
 
             var signature = rsa.SignData(Encoding.UTF8.GetBytes(baseString), hAlg);
 
             var signatureString = Convert.ToBase64String(signature);
-            
-            return "Bearer " + string.Join(".", new []{ baseString, signatureString});
+
+            return "Bearer " + string.Join(".", new[] { baseString, signatureString });
+        }
+
+        /// <summary>
+        /// Validate JWT signature and 'issued at' timestamp.
+        /// </summary>
+        /// <param name="jwt">The JWT token</param>
+        /// <param name="apiDomain">The api domain jwt was obtained, for example us1.gigya.com</param>
+        /// <returns> null - validation failed. A claims dictionary if validation successful.</returns>
+        public static IDictionary<string, object> ValidateSignature(string jwt, string apiDomain)
+        {
+            return JwtUtils.ValidateSignature(jwt, apiDomain);
         }
     }
 }
