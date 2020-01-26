@@ -42,14 +42,14 @@ namespace Gigya.Socialize.SDK.Internals
             }
         }
 
-        private static bool IsTimestampValid(ulong timestamp, int allowDiffSec)
+        private static bool IsTimestampValid(int timestamp, int allowDiffSec)
         {
             var unixTimeStartUtc = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var offset = DateTime.UtcNow - unixTimeStartUtc.AddSeconds(timestamp);
             return Math.Abs(offset.TotalSeconds) < allowDiffSec;
         }
 
-        private static RSACryptoServiceProvider RSAFromJWKString(string jwk)
+        private static RSACryptoServiceProvider RSAFromKeyParams(string jwk)
         {
             try
             {
@@ -73,11 +73,11 @@ namespace Gigya.Socialize.SDK.Internals
         }
 
         /// <summary>
-        /// Fetch available public key JWK representation validated by the "kid".
+        /// Fetch available public key representation validated by the "kid".
         /// </summary>
         /// <param name="kid">The keyId</param>
-        /// <param name="apiDomain">The datacenter</param>
-        private static string FetchPublicJWK(string kid, string apiDomain)
+        /// <param name="apiDomain">The api domain jwt was obtained, for example us1.gigya.com</param>
+        private static string FetchPublicKey(string kid, string apiDomain)
         {
             var resourceUri = $"https://accounts.{apiDomain}/accounts.getJWTPublicKey?V2=true";
             var request = (HttpWebRequest)WebRequest.Create(resourceUri);
@@ -88,41 +88,38 @@ namespace Gigya.Socialize.SDK.Internals
             request.ServicePoint.Expect100Continue = false;
 
             GSResponse response;
-
             using (var webResponse = (HttpWebResponse)request.GetResponse())
             using (var sr = new StreamReader(webResponse.GetResponseStream(), Encoding.UTF8))
                 response = new GSResponse(request.Method, headers: null, sr.ReadToEnd(), logSoFar: null);
 
             if (response.GetErrorCode() == 0)
             {
-
                 GSArray keys = response.GetArray("keys", null);
-                if (keys == null)
+                if (keys == null || keys.Length == 0)
                 {
-                    return null; // Failed to obtain JWK from response data
-                }
-                if (keys.Length == 0)
-                {
-                    return null; // Failed to obtain JWK from response data - data is empty
+                    // Failed to obtain JWK from response data OR data is empty
+                    return null;
                 }
 
                 foreach (object key in keys)
-                {
                     if (key is GSObject)
                     {
-                        string jwkKid = ((GSObject)key).GetString("kid", null);
-                        if (jwkKid != null && jwkKid == kid)
-                        {
+                        string jwtKid = ((GSObject)key).GetString("kid", null);
+                        if (jwtKid != null && jwtKid == kid)
                             return ((GSObject)key).ToJsonString();
-                        }
                     }
-                }
             }
 
             return null;
         }
 
-        public static IDictionary<string, string> ValidateSignature(string jwt, string apiDomain)
+        /// <summary>
+        /// Validate JWT signature and expiration.
+        /// Pay attention, the public key is cached for 24 hours by kid.
+        /// </summary>
+        /// <param name="jwt"></param>
+        /// <param name="apiDomain">The api domain jwt was obtained, for example us1.gigya.com</param>
+        public static IDictionary<string, object> ValidateSignature(string jwt, string apiDomain)
         {
             var segments = jwt.Split('.');
 
@@ -139,36 +136,38 @@ namespace Gigya.Socialize.SDK.Internals
             string publicJWK = null;
 
             // Try to fetch from cache, check isn't too old, fetch again if
-            if (_publicKeysCache.ContainsKey(apiDomain))
+            if (_publicKeysCache.ContainsKey(kid))
             {
-                var pair = _publicKeysCache[apiDomain];
-                if ( DateTime.UtcNow - pair.Value < TimeSpan.FromDays(1))
+                var pair = _publicKeysCache[kid];
+                if (DateTime.UtcNow - pair.Value < TimeSpan.FromDays(1))
                     publicJWK = pair.Key;
             }
 
             if (publicJWK == null)
-                publicJWK = FetchPublicJWK(kid, apiDomain);
+                publicJWK = FetchPublicKey(kid, apiDomain);
 
             if (publicJWK == null)
                 return null;
 
-            var rsa = RSAFromJWKString(publicJWK);
-            if (rsa == null)
-                return null; // Failed to instantiate PublicKey instance from jwk
+            using (var rsa = RSAFromKeyParams(publicJWK))
+            {
+                if (rsa == null)
+                    return null; // Failed to instantiate PublicKey instance from jwk
 
-            _publicKeysCache[apiDomain] = new KeyValuePair<string, DateTime>(publicJWK, DateTime.UtcNow);
+                _publicKeysCache[kid] = new KeyValuePair<string, DateTime>(key: publicJWK, value: DateTime.UtcNow);
 
-            var data = Encoding.UTF8.GetBytes(segments[0] + '.' + segments[1]);
-            var signature = segments[2].FromBase64UrlString();
+                var data = Encoding.UTF8.GetBytes(segments[0] + '.' + segments[1]);
+                var signature = segments[2].FromBase64UrlString();
 
-            var result = rsa.VerifyData(data, "SHA256", signature);
+                var valid = rsa.VerifyData(data, "SHA256", signature);
 
-            if (!result)
-                return null; // Failed to validate the token signature
+                if (!valid)
+                    return null; // Failed to validate the jwt signature
+            }
 
-            var claims = Deserialize<Dictionary<string, string>>(segments[1]);
+            var claims = Deserialize<Dictionary<string, object>>(segments[1]);
 
-            if (!IsTimestampValid(ulong.Parse(claims["iat"]), 60 * 2))
+            if (!IsTimestampValid((int)claims["iat"], 60 * 2))
                 return null; // Failed to validate the jwt token issued at
 
             return claims;
