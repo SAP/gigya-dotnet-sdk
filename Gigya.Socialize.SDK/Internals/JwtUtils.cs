@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
 
+// ReSharper disable MemberCanBePrivate.Global
 // ReSharper disable ClassNeverInstantiated.Global
 // ReSharper disable UnusedAutoPropertyAccessor.Global
 
@@ -28,9 +29,9 @@ namespace Gigya.Socialize.SDK.Internals
 
         private static readonly Dictionary<string, KeyValuePair<string, DateTime>> _publicKeysCache = new Dictionary<string, KeyValuePair<string, DateTime>>(StringComparer.InvariantCultureIgnoreCase);
 
-        private static T Deserialize<T>(string sourceBase64) => _deserializer.Deserialize<T>(sourceBase64.FromBase64UrlString().GetString());
+        internal static T Deserialize<T>(string sourceBase64) => _deserializer.Deserialize<T>(sourceBase64.FromBase64UrlString().GetString());
 
-        private static T TryButNotTooHard<T>(Func<T> func)
+        internal static T SafeNoException<T>(Func<T> func)
         {
             try
             {
@@ -42,14 +43,14 @@ namespace Gigya.Socialize.SDK.Internals
             }
         }
 
-        private static bool IsTimestampValid(int timestamp, int allowDiffSec)
+        internal static bool IsTimestampValid(int timestamp, int allowDiffSec)
         {
             var unixTimeStartUtc = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var offset = DateTime.UtcNow - unixTimeStartUtc.AddSeconds(timestamp);
             return Math.Abs(offset.TotalSeconds) < allowDiffSec;
         }
 
-        private static RSACryptoServiceProvider RSAFromKeyParams(string jwk)
+        internal static RSACryptoServiceProvider RSAFromKeyParams(string jwk)
         {
             try
             {
@@ -77,7 +78,7 @@ namespace Gigya.Socialize.SDK.Internals
         /// </summary>
         /// <param name="kid">The keyId</param>
         /// <param name="apiDomain">The api domain jwt was obtained, for example us1.gigya.com</param>
-        private static string FetchPublicKey(string kid, string apiDomain)
+        internal static string FetchPublicKey(string kid, string apiDomain)
         {
             var resourceUri = $"https://accounts.{apiDomain}/accounts.getJWTPublicKey?V2=true";
             var request = (HttpWebRequest)WebRequest.Create(resourceUri);
@@ -90,16 +91,14 @@ namespace Gigya.Socialize.SDK.Internals
             GSResponse response;
             using (var webResponse = (HttpWebResponse)request.GetResponse())
             using (var sr = new StreamReader(webResponse.GetResponseStream(), Encoding.UTF8))
-                response = new GSResponse(request.Method, headers: null, sr.ReadToEnd(), logSoFar: null);
+                response = new GSResponse(method:request.Method, responseText: sr.ReadToEnd(), logSoFar: null);
 
             if (response.GetErrorCode() == 0)
             {
                 GSArray keys = response.GetArray("keys", null);
+                
                 if (keys == null || keys.Length == 0)
-                {
-                    // Failed to obtain JWK from response data OR data is empty
-                    return null;
-                }
+                    return null; // Failed to obtain JWK from response data OR data is empty
 
                 foreach (object key in keys)
                     if (key is GSObject)
@@ -126,7 +125,7 @@ namespace Gigya.Socialize.SDK.Internals
             if (segments.Length != 3)
                 return null;
 
-            var jwtHeader = TryButNotTooHard(() => Deserialize<JwtHeader>(segments[0]));
+            var jwtHeader = SafeNoException(() => Deserialize<JwtHeader>(segments[0]));
 
             string kid = jwtHeader?.kid;
 
