@@ -165,9 +165,4 @@ Documentation/
 *.orig
 .vs/
 paket-files/
-
-
-Gigya.Socialize.SDK/obj/
-SDK_Tester/obj/
-SDK_Tester/bin/
-SDK_Console_Tester/obj/x86/Release/SDK_Console_Tester.csproj.FileListAbsolute.txt
+*.suo
