@@ -1,6 +1,5 @@
 ﻿/*
  * Copyright (C) 2011 Gigya, Inc.
- * Version 2.16.0
  */
 
 using System;
@@ -187,13 +186,12 @@ namespace Gigya.Socialize.SDK
             var baseString = string.Join(".",
                 new[] { Convert.ToBase64String(headerBytes), Convert.ToBase64String(payloadBytes) });
 
-            var rsa = RsaUtils.DecodeRsaPrivateKey(privateKey);
-
-            var signature = rsa.SignData(Encoding.UTF8.GetBytes(baseString), hAlg);
-
-            var signatureString = Convert.ToBase64String(signature);
-
-            return "Bearer " + string.Join(".", new[] { baseString, signatureString });
+            using (var rsa = RsaUtils.DecodeRsaPrivateKey(privateKey))
+            {
+                var signature = rsa.SignData(Encoding.UTF8.GetBytes(baseString), hAlg);
+                var signatureString = Convert.ToBase64String(signature);
+                return "Bearer " + string.Join(".", new[] { baseString, signatureString });
+            }
         }
 
         /// <summary>

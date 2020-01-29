@@ -38,15 +38,18 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
         public void ValidateSignature()
         {
             // ARRANGE
-            string jwt = GetJWT();
-    
-            Assert.IsTrue(jwt?.Length > 0, "Failed to obtain a jwt from getJWT()");
+            string jwtIdToken = GetJWT();
+
+            Console.WriteLine("id_token: " + jwtIdToken);
+            Console.WriteLine();
+
+            Assert.IsTrue(jwtIdToken?.Length > 0, "Failed to obtain a jwt from getJWT()");
 
             // ACT
-            var claims = JwtUtils.ValidateSignature(jwt, apiDomain);
+            var claims = JwtUtils.ValidateSignature(jwtIdToken, apiDomain);
 
             for (int i = 0; i < 200; i++)
-                claims = JwtUtils.ValidateSignature(jwt, apiDomain); // should be really fast as public key cached.
+                claims = JwtUtils.ValidateSignature(jwtIdToken, apiDomain); // should be really fast as public key cached.
 
             // ASSERT
             Assert.IsTrue(claims != null, "claims != null");
@@ -65,7 +68,7 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
         {
             var clientParams = new GSObject();
 
-            clientParams.Put("fields", "data.userKey");
+            clientParams.Put("fields", "data.userKey,profile.firstName,profile.lastName,email");
             clientParams.Put("targetUID", targetUID);
 
             var req = new GSRequest(
