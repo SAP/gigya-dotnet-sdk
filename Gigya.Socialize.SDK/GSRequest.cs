@@ -19,6 +19,7 @@ namespace Gigya.Socialize.SDK
     /// </summary>
     public class GSRequest
     {
+        // Please don't change manually, will be auto increased by publishing script according to AssemblyInfo.
         public const String version = "2.16.3";
 
         /// <summary>
