@@ -28,11 +28,8 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
         // Console site (Partner ID: 2) - partner secret
         string secret = "exfRc6Z5xno4jeRL7h70cQy9i9UbZe/YkRm32vYEFec=";
 
-        // A test console site user qwe@gmail.com having in data a userKey (targetUserKey)
+        // A test console site user qwe@gmail.com
         string targetUID = "21acbd86802c44089bddb16e0a205c36";
-
-        // A userKey we expect - associated with console account referenced by targetUID
-        private string targetUserKey = "AOfo7DCXzsYB";
 
         [Test]
         public void ValidateSignature()
@@ -55,7 +52,7 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
             Assert.IsTrue(claims != null, "claims != null");
             Assert.IsTrue((string)claims["sub"] == targetUID, "'sub' != targetUID");
             Assert.IsTrue((string)claims["apiKey"] == apiKey, "'apiKey' == apiKey");
-            Assert.IsTrue((string)claims["data.userKey"] == targetUserKey, "missing 'data.userKey'");
+            Assert.IsTrue((string)claims["email"] != null, "missing 'email'");
 
             foreach (var pair in claims)
                 Console.WriteLine($"{pair.Key} : {pair.Value}");
@@ -68,7 +65,7 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
         {
             var clientParams = new GSObject();
 
-            clientParams.Put("fields", "data.userKey,profile.firstName,profile.lastName,email");
+            clientParams.Put("fields", "profile.firstName,profile.lastName,email,data.userKey");
             clientParams.Put("targetUID", targetUID);
 
             var req = new GSRequest(
