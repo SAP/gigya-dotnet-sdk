@@ -20,7 +20,7 @@ namespace Gigya.Socialize.SDK
     public class GSRequest
     {
         // Please don't change manually, will be auto increased by publishing script according to AssemblyInfo.
-        public const String version = "2.16.3";
+        public const String version = "2.16.4";
 
         /// <summary>
         /// This flag tells the SDK to try and reuse connections to the gigya servers, in order to lower the overheads

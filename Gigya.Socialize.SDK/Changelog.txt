@@ -1,5 +1,6 @@
-﻿[Version 2.16.3]
-* Added JWT signature validation
+﻿[Version 2.16.4]
+* Added JWT signature validation.
+* The SDK is strong-named with the same public key as version 2.15.4.
 
 [Version 2.16.1]
 * Bug fix: Trimming extra characters from private keys
