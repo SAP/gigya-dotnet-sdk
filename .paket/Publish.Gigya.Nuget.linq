@@ -11,14 +11,17 @@ void Main()
     // Author: A.Chirlin
     // 1.0.0 - 29/01/2020
     
-    // The following will be performed
+    // The following will be performed:
     
-    
-    // Increase version in 
-    //   1) Gigya.Socialize.SDK\Properties\AssemblyInfo.cs
-    //   2) Gigya.Socialize.SDK\GSRequest.cs
+    /*  1. Increase version in ( if autoVersionIncrease == true )
+           1) Gigya.Socialize.SDK\Properties\AssemblyInfo.cs
+           2) Gigya.Socialize.SDK\GSRequest.cs
+        2. Build in release mode the GSCSharpSDK
+        3. If built successfully, then pack with packet and publish to Gigya Nuget
+    */
 
-    var autoVersionIncrease = true;
+    var autoVersionIncrease = true; // Increase version in above file, else skip and work with current version
+    var pushToGigyaNuget    = true;// Skip pushing to Gigya Nuget.
 
     var qPath = new FileInfo(LINQPad.Util.CurrentQuery.FilePath).Directory.FullName;
     var root =   Path.Combine(qPath, @"..\");
@@ -73,13 +76,18 @@ void Main()
             
             if(File.Exists(package) && packResult == 0)
             {
-                var push = new Executable(Path.Combine(root, ".nuget", "NuGet.exe"));
-                pack.WorkingDirectory = root;
-                push.Arguments = $"push -Source http://nuget.gigya.net/nugetForVS/nuget/ {package}";
-                push.StandardOutputFileName = Path.GetTempFileName();
-                var pushResult = push.Run().Dump($"Pushed (should be 0): {package}");
-                if (pushResult != 0)
-                    Console.WriteLine($"Failed to push the package: {package}, Details: " + File.ReadAllText(push.StandardOutputFileName));
+                if(pushToGigyaNuget)
+                {
+                    var push = new Executable(Path.Combine(root, ".nuget", "NuGet.exe"));
+                    pack.WorkingDirectory = root;
+                    push.Arguments = $"push -Source http://nuget.gigya.net/nugetForVS/nuget/ {package}";
+                    push.StandardOutputFileName = Path.GetTempFileName();
+                    var pushResult = push.Run().Dump($"Pushed (should be 0): {package}");
+                    if (pushResult != 0)
+                        Console.WriteLine($"Failed to push the package: {package}, Details: " + File.ReadAllText(push.StandardOutputFileName));
+                }
+                else
+                    Console.WriteLine("Skip pushing to Gigya Nuget. (Set pushToGigyaNuget to true).");
             }
             else
             {
