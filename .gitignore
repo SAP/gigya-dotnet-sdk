@@ -3,4 +3,4 @@ SDK_Console_Tester\Properties\
 *.user
 **/obj/
 **/bin/
-
+.idea/
