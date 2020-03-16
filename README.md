@@ -9,8 +9,9 @@ The library makes it simple to integrate Gigya's service in your .NET applicatio
 [.NET](https://dotnet.microsoft.com/download/dotnet-framework) >= 4.5
 
 ## Download and Installation
-* Download the SDK (above).
-* Add reference to the downloaded SDK's DLL in your project.
+* Clone the repo.
+* Open the solution.
+* Build.
 
 ## Configuration
 * [Obtain a Gigya APIKey and Secret key](https://developers.gigya.com/display/GD/.NET#id-.NET-ObtainingGigya'sAPIKeyandSecretkey).
@@ -28,6 +29,7 @@ None
 
 ## How to obtain support
 Via SAP standard support.
+https://developers.gigya.com/display/GD/Opening+A+Support+Incident
 
 ## Contributing
 Via pull request to this repository.
