@@ -69,8 +69,8 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
             clientParams.Put("targetUID", targetUID);
 
             var req = new GSRequest(
-                apiKey: apiKey,
-                secretKey: secret, 
+                apiKey,
+                secret, 
                 "accounts.getJWT", 
                 clientParams)
             {

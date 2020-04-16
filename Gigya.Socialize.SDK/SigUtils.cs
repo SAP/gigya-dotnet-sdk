@@ -40,6 +40,28 @@ namespace Gigya.Socialize.SDK
 
         /// <summary>
         /// Use this method to verify the authenticity of a 
+        /// <a href="https://developers.gigya.com/display/GD/socialize.getUserInfo+REST">socialize.getUserInfo</a> API method response,
+        /// to make sure it is in fact originating from Gigya, and prevent fraud. 
+        /// The "socialize.getUserInfo" API method response data include the following fields: 
+        /// UID, signatureTimestamp (a timestamp) and UIDSignature (a cryptographic signature).
+        /// Pass these fields as the corresponding parameters of this method, along with your partner's "Secret Key".
+        /// Your secret key (provided in BASE64 encoding) is located at the bottom of the 
+        /// <a href="https://console.gigya.com/site/partners/wfsocapi.aspx#&amp;&amp;userstate=SiteSetup">Site Setup</a> page on Gigya's website.
+        /// The return value of the method indicates if the signature is valid (thus, originating from Gigya) or not.
+        /// </summary>
+        /// <param name="UID">pass the UID field returned by the "socialize.getUserInfo" API method response </param>
+        /// <param name="timestamp">pass the signatureTimestamp field returned by the "socialize.getUserInfo" API method response </param>
+        /// <param name="secret">your partner's "Secret Key", obtained from Gigya's website.</param>
+        /// <param name="signature">pass the UIDSignature field returned by the "socialize.getUserInfo" API method response</param>
+        /// <param name="expiration">pass the signature expiration time in seconds to validate against the signature timestamp</param>
+        /// <returns></returns>
+        public static bool ValidateUserSignature(string UID, string timestamp, string secret, string signature, int expiration)
+        {
+            return !SignatureTimestampExpired(timestamp, expiration) && ValidateUserSignature(UID, timestamp, secret, signature);
+        }
+
+        /// <summary>
+        /// Use this method to verify the authenticity of a 
         /// <a href="https://developers.gigya.com/display/GD/socialize.getFriendsInfo+REST">socialize.getFriendsInfo</a> API 
         /// method response, to make sure it is in fact originating from Gigya, and prevent fraud. 
         /// The "socialize.getFriendsInfo" API method response data include the following fields: 
@@ -59,6 +81,29 @@ namespace Gigya.Socialize.SDK
         {
             string expectedSig = CalcSignature(timestamp + "_" + friendUID + "_" + UID, secret);
             return expectedSig.Equals(signature);
+        }
+
+        /// <summary>
+        /// Use this method to verify the authenticity of a 
+        /// <a href="https://developers.gigya.com/display/GD/socialize.getFriendsInfo+REST">socialize.getFriendsInfo</a> API 
+        /// method response, to make sure it is in fact originating from Gigya, and prevent fraud. 
+        /// The "socialize.getFriendsInfo" API method response data include the following fields: 
+        /// UID, signatureTimestamp (a timestamp) and friendshipSignature (a cryptographic signature).
+        /// Pass these fields as the corresponding parameters of this method, along with your partner's "Secret Key". Your secret 
+        /// key (provided in BASE64 encoding) is located at the bottom of the 
+        /// <a href="https://console.gigya.com/site/partners/wfsocapi.aspx#&amp;&amp;userstate=SiteSetup">Site Setup</a> page on Gigya's website.
+        /// The return value of the method indicates if the signature is valid (thus, originating from Gigya) or not.
+        /// </summary>
+        /// <param name="UID">pass the UID field returned by the "socialize.getFriendsInfo" API method response </param>
+        /// <param name="timestamp">pass the signatureTimestamp field returned by the "socialize.getFriendsInfo" API method response </param>
+        /// <param name="friendUID"></param>
+        /// <param name="secret">your partner's "Secret Key", obtained from Gigya's website.</param>
+        /// <param name="signature">pass the friendshipSignature field returned by the "socialize.getFriendsInfo" API method response</param>
+        /// <returns></returns>
+        public static bool ValidateFriendSignature(string UID, string timestamp, string friendUID, string secret, string signature, int expiration)
+        {
+            return !SignatureTimestampExpired(timestamp, expiration) &&
+                   ValidateFriendSignature(UID, timestamp, friendUID, secret, signature);
         }
 
         /// <summary>
@@ -133,6 +178,11 @@ namespace Gigya.Socialize.SDK
             return (long)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalMilliseconds;
         }
 
+        internal static int CurrentTimeSeconds()
+        {
+            return (int)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds;
+        }
+
         public static string GetDynamicSessionSignature(string glt_cookie, int timeoutInSeconds, string secret)
         {
             // cookie format: 
@@ -203,6 +253,19 @@ namespace Gigya.Socialize.SDK
         public static IDictionary<string, object> ValidateSignature(string jwt, string apiDomain)
         {
             return JwtUtils.ValidateSignature(jwt, apiDomain);
+        }
+
+        private static bool SignatureTimestampExpired(string signatureTimestamp, int expiration)
+        {
+            try
+            {
+                var timestamp = Convert.ToInt32(signatureTimestamp);
+                return Math.Abs(CurrentTimeSeconds() - timestamp) > expiration;
+            }
+            catch
+            {
+                return true;
+            }
         }
     }
 }
