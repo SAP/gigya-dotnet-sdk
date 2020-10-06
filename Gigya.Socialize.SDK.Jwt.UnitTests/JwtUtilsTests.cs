@@ -23,13 +23,13 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
         string apiDomain = "il1.gigya.com";
 
         // IL1 Console Site API key
-        string apiKey = "3_HkXvtGOzd1QMcVfHye7gcamXbLAoC77C4TCB7gk8mych-xEm5HTL0bCKBTNp56hk";
+        string apiKey = "...";
         
-        // Console site (Partner ID: 2) - partner secret
-        string secret = "exfRc6Z5xno4jeRL7h70cQy9i9UbZe/YkRm32vYEFec=";
+        // Console site (Partner ID) - partner secret
+        string secret = "...";
 
-        // A test console site user qwe@gmail.com
-        string targetUID = "21acbd86802c44089bddb16e0a205c36";
+        // A test console site user 
+        string targetUID = "...";
 
         [Test]
         public void ValidateSignature()

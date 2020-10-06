@@ -11,8 +11,8 @@ namespace SDK_Tester
     static class Program
     {
         // Define the API-Key and Secret key (the keys can be obtained from your site setup page on Gigya's website).
-        const string apiKey = "3_VhmtkuYIX72Jmmuxi1C4eRfjmO2CGnLu5YtcpCJuwpbec4hNkhStGDSm2T2sEuQj";
-        const string secretKey = "AhtCX5+ke9FsTGLfhwnIZ6tVBV8F1ziVzXM0r/cSCXM=";
+        const string apiKey = "...";
+        const string secretKey = "...";
 
         private static readonly AuthRequestTester AuthRequestTester = new AuthRequestTester();
 
