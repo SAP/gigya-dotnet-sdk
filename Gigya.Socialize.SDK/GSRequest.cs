@@ -9,6 +9,7 @@ using System.Net;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Threading;
+using System.Web;
 
 
 namespace Gigya.Socialize.SDK
@@ -602,7 +603,7 @@ namespace Gigya.Socialize.SDK
                 {
                     retQS.Append(key);
                     retQS.Append('=');
-                    retQS.Append(GSRequest.UrlEncode(value));
+                    retQS.Append(HttpUtility.UrlEncode(value));
                     retQS.Append('&');
                 }
             }
