@@ -387,7 +387,16 @@ namespace Gigya.Socialize.SDK
         /// <returns>a GSResponse object representing Gigya's response</returns>
         public GSResponse Send()
         {
-            return this.Send(Timeout.Infinite);
+            return this.Send(Timeout.Infinite, false);
+        }
+
+        /// <summary>
+        /// Send the request synchronously
+        /// </summary>
+        /// <returns>a GSResponse object representing Gigya's response</returns>
+        public GSResponse Send(bool useWideCharacterEncoding = false)
+        {
+            return this.Send(Timeout.Infinite, useWideCharacterEncoding);
         }
 
         /// <summary>
@@ -395,7 +404,7 @@ namespace Gigya.Socialize.SDK
         /// </summary>
         /// <param name="timeout">Connection timeout in milliseconds</param>
         /// <returns>a GSResponse object representing Gigya's response</returns>
-        public GSResponse Send(int timeout)
+        public GSResponse Send(int timeout, bool useWideCharacterEncoding = false)
         {
             _format = _dictionaryParams.GetString("format", "json");
             
@@ -412,14 +421,14 @@ namespace Gigya.Socialize.SDK
 
                 BuildUri(Method);
                 // Send request by HTTP POST
-                var resp = SendRequestAndRecoverFromExpiredConnections("POST", timeout);
+                var resp = SendRequestAndRecoverFromExpiredConnections("POST", timeout, useWideCharacterEncoding);
 
                 // If we received an error from the server indicating that our clock isn't synchronized with the server's,
                 // we adjust the time correction by the time delta and perform one retry.
                 if (resp.GetErrorCode() == 403002 && resp.GetHeaders()["Date"] != null)
                 {
                     timeCorrection = (long)(DateTime.Parse(resp.GetHeaders()["Date"]) - DateTime.Now).TotalMilliseconds;
-                    resp = SendRequestAndRecoverFromExpiredConnections("POST", timeout);
+                    resp = SendRequestAndRecoverFromExpiredConnections("POST", timeout, useWideCharacterEncoding);
                 }
 
                 return resp;
@@ -448,7 +457,7 @@ namespace Gigya.Socialize.SDK
         /// IAsyncResult.AsyncWaitHandle. In either case, once you are signalled of the response, you need to call
         /// EndSend() to receive it.
         /// </summary>
-        public IAsyncResult BeginSend(AsyncCallback callback, object state)
+        public IAsyncResult BeginSend(AsyncCallback callback, object state, bool useWideCharacterEncoding = false)
         {
             this._format = this._dictionaryParams.GetString("format", "json");
 
@@ -477,7 +486,7 @@ namespace Gigya.Socialize.SDK
                 var reliableRequest = new GSAsyncReliableRequest(
 
                     // We pass a factory to generate requests
-                    (out HttpWebRequest request_, out byte[] requestBody_) => { request_ = PrepareHttpRequest("POST", -1, out requestBody_); },
+                    (out HttpWebRequest request_, out byte[] requestBody_) => { request_ = PrepareHttpRequest("POST", -1, out requestBody_, useWideCharacterEncoding); },
 
                     // Once we got a response we create and store the GSResponse object. If we encounter error #403002, we correct the timestamp and
                     // resend the request once.
@@ -589,7 +598,7 @@ namespace Gigya.Socialize.SDK
         /// <param name="addQuestionMark">Set to true if you want the returned string to start with a question mark.</param>
         /// <param name="paramDictionary">the GSObject to get the query string from</param>
         /// <returns></returns>
-        public static string BuildQS(bool addQuestionMark, GSObject paramDictionary)
+        public static string BuildQS(bool addQuestionMark, GSObject paramDictionary, bool useWideCharacterEncoding = false)
         {
             StringBuilder retQS = new StringBuilder();
             string value;
@@ -603,7 +612,10 @@ namespace Gigya.Socialize.SDK
                 {
                     retQS.Append(key);
                     retQS.Append('=');
-                    retQS.Append(HttpUtility.UrlEncode(value));
+                    // Toggle is needed for backward compatibility
+                    // Note: GSRequest.UrlEncode(...) is not working correctly for wide characters
+                    // for example Japanese/Chinese/etc...
+                    retQS.Append(useWideCharacterEncoding ? HttpUtility.UrlEncode(value) : GSRequest.UrlEncode(value));
                     retQS.Append('&');
                 }
             }
@@ -646,7 +658,7 @@ namespace Gigya.Socialize.SDK
 
         #region Private Methods
 
-        private HttpWebRequest PrepareHttpRequest(string httpMethod, int timeout, out byte[] requestBody)
+        private HttpWebRequest PrepareHttpRequest(string httpMethod, int timeout, out byte[] requestBody, bool isNewUrlEncodeToggle = false)
         {
             // Set Protocol and URI
             var protocol =
@@ -661,7 +673,7 @@ namespace Gigya.Socialize.SDK
 
             Logger.Write("serverParams", _dictionaryParams);
             // Build the query string from the dictionary
-            var data = BuildQS(false /*dont add question mark*/, _dictionaryParams);
+            var data = BuildQS(false /*dont add question mark*/, _dictionaryParams, isNewUrlEncodeToggle);
 
             Logger.Write("URL", resourceUri);
             Logger.Write("postData", data);
@@ -739,7 +751,7 @@ namespace Gigya.Socialize.SDK
         /// This method keeps re-sending the request as long as we encounter an error from an expired connection, up to
         /// the number of active connections, unless RecoverFromExpiredConnections is set to false.
         /// </summary>
-        GSResponse SendRequestAndRecoverFromExpiredConnections(string httpMethod, int timeout)
+        GSResponse SendRequestAndRecoverFromExpiredConnections(string httpMethod, int timeout, bool isNewUrlEncodeToggle = false)
         {
             int retries = 0;
             while (true)
@@ -747,7 +759,7 @@ namespace Gigya.Socialize.SDK
                 HttpWebRequest request = null;
                 try
                 {
-                    return SendRequest(httpMethod, timeout, out request);
+                    return SendRequest(httpMethod, timeout, out request, isNewUrlEncodeToggle);
                 }
                 catch (WebException e)
                 {
@@ -766,10 +778,10 @@ namespace Gigya.Socialize.SDK
         /// </summary>
         /// <param name="httpMethod">"POST" or "GET"</param>        
         /// <returns></returns>
-        private GSResponse SendRequest(string httpMethod, int timeout, out HttpWebRequest request)
+        private GSResponse SendRequest(string httpMethod, int timeout, out HttpWebRequest request, bool isNewUrlEncodeToggle = false)
         {
             byte[] form_body;
-            request = PrepareHttpRequest(httpMethod, timeout, out form_body);
+            request = PrepareHttpRequest(httpMethod, timeout, out form_body, isNewUrlEncodeToggle);
             if (Proxy != null) request.Proxy = Proxy;
 
             // Write content to the request.
