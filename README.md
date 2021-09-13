@@ -36,4 +36,7 @@ Via pull request to this repository.
 ## To-Do (upcoming changes)
 None
 
+## Licensing
+Please see our [LICENSE](https://github.com/SAP/gigya-dotnet-sdk/blob/main/LICENSE.txt) for copyright and license information.
+
 [![REUSE status](https://api.reuse.software/badge/github.com/SAP/gigya-dotnet-sdk)](https://api.reuse.software/info/github.com/SAP/gigya-dotnet-sdk)
