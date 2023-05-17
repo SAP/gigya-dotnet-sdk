@@ -33,6 +33,9 @@ None
 ## Contributing
 Via pull request to this repository.
 
+## Code of Conduct
+See [CODE_OF_CONDUCT](https://github.com/SAP/gigya-dotnet-sdk/blob/main/CODE_OF_CONDUCT.md)
+
 ## To-Do (upcoming changes)
 None
 
