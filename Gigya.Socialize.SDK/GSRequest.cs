@@ -684,7 +684,21 @@ namespace Gigya.Socialize.SDK
             if (null != AdditionalHeaders)
                 request.Headers.Add(AdditionalHeaders);
             request.ServicePoint.Expect100Continue = false;
+            
+            // Allow derived classes to configure the request (e.g., add client certificates)
+            ConfigureRequest(request);
+            
             return request;
+        }
+
+        /// <summary>
+        /// Virtual method hook to allow derived classes to configure the HttpWebRequest
+        /// before it is sent (e.g., to add client certificates for mTLS).
+        /// </summary>
+        /// <param name="request">The HttpWebRequest to configure.</param>
+        protected virtual void ConfigureRequest(HttpWebRequest request)
+        {
+            // Base implementation does nothing
         }
 
         protected virtual void SetDefaultParams(string httpMethod, string resourceUri)
