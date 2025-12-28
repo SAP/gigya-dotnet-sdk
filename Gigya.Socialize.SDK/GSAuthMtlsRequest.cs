@@ -44,6 +44,14 @@ namespace Gigya.Socialize.SDK
         }
 
         /// <summary>
+        /// Override to ensure mTLS requests always use accounts.gigya.com (hardcoded, cannot be overridden).
+        /// </summary>
+        protected override string GetRequestDomain(string methodNamespace)
+        {
+            return "accounts.gigya.com";
+        }
+
+        /// <summary>
         /// Override hook method to apply client certificates to HTTPS connections.
         /// This method is called by GSRequest.Send() after creating the connection.
         /// </summary>

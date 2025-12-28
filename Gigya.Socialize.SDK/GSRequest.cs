@@ -289,14 +289,25 @@ namespace Gigya.Socialize.SDK
 
             if (apiMethod.IndexOf(".", StringComparison.Ordinal) == -1)
             {
-                _domain = UseMethodDomain ? "socialize." + this.APIDomain : this.APIDomain;
+                _domain = GetRequestDomain("socialize");
                 _path = "/socialize." + apiMethod;
             }
             else
             {
-                _domain = UseMethodDomain ? apiMethod.Split(new char[] { '\\', '.' })[0] + "." + this.APIDomain : this.APIDomain;
+                string methodNamespace = apiMethod.Split(new char[] { '\\', '.' })[0];
+                _domain = GetRequestDomain(methodNamespace);
                 _path = "/" + apiMethod;
             }
+        }
+
+        /// <summary>
+        /// Gets the domain for the request. Can be overridden by subclasses to use a different domain.
+        /// </summary>
+        /// <param name="methodNamespace">The namespace of the API method (e.g., "accounts", "socialize")</param>
+        /// <returns>The domain to use for this request</returns>
+        protected virtual string GetRequestDomain(string methodNamespace)
+        {
+            return UseMethodDomain ? methodNamespace + "." + this.APIDomain : this.APIDomain;
         }
 
         #endregion
