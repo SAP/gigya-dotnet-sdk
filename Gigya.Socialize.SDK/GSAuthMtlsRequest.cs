@@ -44,7 +44,7 @@ namespace Gigya.Socialize.SDK
         }
 
         /// <summary>
-        /// Override to ensure mTLS requests always use accounts.gigya.com (hardcoded, cannot be overridden).
+        /// Override to ensure mTLS requests always use accounts.gigya.com
         /// </summary>
         protected override string GetRequestDomain(string methodNamespace)
         {
