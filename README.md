@@ -14,12 +14,12 @@ The library makes it simple to integrate Gigya's service in your .NET applicatio
 * Build.
 
 ## Configuration
-* [Obtain a Gigya APIKey and Secret key](https://developers.gigya.com/display/GD/.NET#id-.NET-ObtainingGigya'sAPIKeyandSecretkey).
+* [Obtain a Gigya APIKey and Secret key](https://github.com/SAP/gigya-dotnet-sdk/wiki#obtaining-gigyas-api-key-and-secret-key).
 * Include the Gigya SDK namespace in your C# source:
 ```C#
 using Gigya.Socialize.SDK;
 ```
-* Start using according to [documentation](http://developers.gigya.com/display/GD/.NET).
+* Start using according to [documentation](https://github.com/SAP/gigya-dotnet-sdk/wiki).
 
 ## Limitations
 None
