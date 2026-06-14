@@ -9,8 +9,8 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Web;
-using System.Web.Script.Serialization;
 
 namespace Gigya.Socialize.SDK
 {
@@ -589,27 +589,16 @@ namespace Gigya.Socialize.SDK
         /// <returns></returns>
         public GSObject Clone()
         {
-            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter formater = null;
-            System.IO.MemoryStream stream = null;
-            GSObject ret = null;
             try
             {
-                // Serialize object
-                formater = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
-                stream = new System.IO.MemoryStream();
-                formater.Serialize(stream, this);
-
-                // Deserialize it
-                stream.Position = 0;
-                ret = (GSObject)formater.Deserialize(stream);
+                var json = JsonSerializer.Serialize(this);
+                return JsonSerializer.Deserialize<GSObject>(json);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                if (stream != null)
-                    stream.Close();
+                Console.WriteLine($"Clone failed: {ex.Message}");
+                return null;
             }
-
-            return ret;
         }
         #endregion
 
@@ -1018,9 +1007,13 @@ namespace Gigya.Socialize.SDK
 
         static Dictionary<string, object> Deserialize(string json)
         {
-            JavaScriptSerializer ds = new JavaScriptSerializer();
-            ds.MaxJsonLength = (int)GSRequest.MaxResponseSize;
-            return (Dictionary<string, object>)ds.DeserializeObject(json);
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            var result = JsonSerializer.Deserialize<Dictionary<string, object>>(json, options);
+            return result;
         }
 
         internal SortedDictionary<string, object> ToSortedDictionary()
@@ -1049,9 +1042,7 @@ namespace Gigya.Socialize.SDK
         public override string ToString()
         {
             SortedDictionary<string, object> obj = this.ToSortedDictionary();
-            var serializer = new JavaScriptSerializer();
-            serializer.MaxJsonLength = (int)GSRequest.MaxResponseSize;
-            string ret = serializer.Serialize(obj);
+            string ret = JsonSerializer.Serialize(obj);
             return ret;
         }
     }

@@ -40,7 +40,7 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
             Console.WriteLine("id_token: " + jwtIdToken);
             Console.WriteLine();
 
-            Assert.IsTrue(jwtIdToken?.Length > 0, "Failed to obtain a jwt from getJWT()");
+            Assert.That(jwtIdToken?.Length > 0, "Failed to obtain a jwt from getJWT()");
 
             // ACT
             var claims = JwtUtils.ValidateSignature(jwtIdToken, apiDomain);
@@ -49,10 +49,10 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
                 claims = JwtUtils.ValidateSignature(jwtIdToken, apiDomain); // should be really fast as public key cached.
 
             // ASSERT
-            Assert.IsTrue(claims != null, "claims != null");
-            Assert.IsTrue((string)claims["sub"] == targetUID, "'sub' != targetUID");
-            Assert.IsTrue((string)claims["apiKey"] == apiKey, "'apiKey' == apiKey");
-            Assert.IsTrue((string)claims["email"] != null, "missing 'email'");
+            Assert.That(claims != null, "claims != null");
+            Assert.That((string)claims["sub"] == targetUID, "'sub' != targetUID");
+            Assert.That((string)claims["apiKey"] == apiKey, "'apiKey' == apiKey");
+            Assert.That((string)claims["email"] != null, "missing 'email'");
 
             foreach (var pair in claims)
                 Console.WriteLine($"{pair.Key} : {pair.Value}");
@@ -79,7 +79,7 @@ namespace Gigya.Socialize.SDK.Jwt.UnitTests
 
             var res = req.Send();
 
-            Assert.IsTrue(res.GetErrorCode() == 0, "res.GetErrorCode() != 0");
+            Assert.That(res.GetErrorCode() == 0, "res.GetErrorCode() != 0");
 
             return res.GetData().GetString("id_token");
         }

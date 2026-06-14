@@ -289,14 +289,25 @@ namespace Gigya.Socialize.SDK
 
             if (apiMethod.IndexOf(".", StringComparison.Ordinal) == -1)
             {
-                _domain = UseMethodDomain ? "socialize." + this.APIDomain : this.APIDomain;
+                _domain = GetRequestDomain("socialize");
                 _path = "/socialize." + apiMethod;
             }
             else
             {
-                _domain = UseMethodDomain ? apiMethod.Split(new char[] { '\\', '.' })[0] + "." + this.APIDomain : this.APIDomain;
+                string methodNamespace = apiMethod.Split(new char[] { '\\', '.' })[0];
+                _domain = GetRequestDomain(methodNamespace);
                 _path = "/" + apiMethod;
             }
+        }
+
+        /// <summary>
+        /// Gets the domain for the request. Can be overridden by subclasses to use a different domain.
+        /// </summary>
+        /// <param name="methodNamespace">The namespace of the API method (e.g., "accounts", "socialize")</param>
+        /// <returns>The domain to use for this request</returns>
+        protected virtual string GetRequestDomain(string methodNamespace)
+        {
+            return UseMethodDomain ? methodNamespace + "." + this.APIDomain : this.APIDomain;
         }
 
         #endregion
@@ -684,7 +695,21 @@ namespace Gigya.Socialize.SDK
             if (null != AdditionalHeaders)
                 request.Headers.Add(AdditionalHeaders);
             request.ServicePoint.Expect100Continue = false;
+            
+            // Allow derived classes to configure the request (e.g., add client certificates)
+            ConfigureRequest(request);
+            
             return request;
+        }
+
+        /// <summary>
+        /// Virtual method hook to allow derived classes to configure the HttpWebRequest
+        /// before it is sent (e.g., to add client certificates for mTLS).
+        /// </summary>
+        /// <param name="request">The HttpWebRequest to configure.</param>
+        protected virtual void ConfigureRequest(HttpWebRequest request)
+        {
+            // Base implementation does nothing
         }
 
         protected virtual void SetDefaultParams(string httpMethod, string resourceUri)

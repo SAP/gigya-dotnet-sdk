@@ -4,7 +4,7 @@ using System.IO;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using System.Web.Script.Serialization;
+using System.Text.Json;
 
 // ReSharper disable MemberCanBePrivate.Global
 // ReSharper disable ClassNeverInstantiated.Global
@@ -25,11 +25,9 @@ namespace Gigya.Socialize.SDK.Internals
 
     internal class JwtUtils
     {
-        private static readonly JavaScriptSerializer _deserializer = new JavaScriptSerializer();
-
         private static readonly Dictionary<string, KeyValuePair<string, DateTime>> _publicKeysCache = new Dictionary<string, KeyValuePair<string, DateTime>>(StringComparer.InvariantCultureIgnoreCase);
 
-        internal static T Deserialize<T>(string sourceBase64) => _deserializer.Deserialize<T>(sourceBase64.FromBase64UrlString().GetString());
+        internal static T Deserialize<T>(string sourceBase64) => JsonSerializer.Deserialize<T>(sourceBase64.FromBase64UrlString().GetString());
 
         internal static T SafeNoException<T>(Func<T> func)
         {
@@ -54,7 +52,7 @@ namespace Gigya.Socialize.SDK.Internals
         {
             try
             {
-                var jPubKey = _deserializer.Deserialize<PublicKeyParams>(jwk);
+                var jPubKey = JsonSerializer.Deserialize<PublicKeyParams>(jwk);
                 var n = jPubKey.n.FromBase64UrlString();
                 var e = jPubKey.e.FromBase64UrlString();
                 var rsa = new RSACryptoServiceProvider();
