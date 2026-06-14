@@ -6,7 +6,7 @@ The .NET library provides C# interface for the Gigya API.
 The library makes it simple to integrate Gigya's service in your .NET application.
 
 ## Requirements
-[.NET](https://dotnet.microsoft.com/download/dotnet-framework) >= 4.5
+[.NET 9](https://dotnet.microsoft.com/download/dotnet/9.0) or later
 
 ## Download and Installation
 * Clone the repo.
@@ -20,6 +20,70 @@ The library makes it simple to integrate Gigya's service in your .NET applicatio
 using Gigya.Socialize.SDK;
 ```
 * Start using according to [documentation](https://github.com/SAP/gigya-dotnet-sdk/wiki).
+
+## Using GSAuthMtlsRequest (Mutual TLS Authentication)
+
+For high-security server-to-server communication, use `GSAuthMtlsRequest` with a client X.509 certificate instead of (or alongside) the site secret. When mTLS is configured, the SDK routes the request to the datacenter-specific endpoint `mtls.{datacenter}.gigya.com` and presents the certificate during the TLS handshake.
+
+### Example with Certificate Files
+
+```C#
+using Gigya.Socialize.SDK;
+
+// Create mTLS config with certificate file paths
+MtlsConfig config = MtlsConfig.FromFiles(
+    "certs/client.pem",    // Path to client certificate
+    "certs/client.key"     // Path to private key
+);
+
+// Create and send the request
+var request = new GSAuthMtlsRequest(
+    "your-api-key",
+    "accounts.getAccountInfo",
+    config
+);
+
+request.SetParam("UID", "user123");
+GSResponse response = request.Send();
+
+if (response.GetErrorCode() == 0)
+{
+    Console.WriteLine("Success: " + response.GetResponseText());
+}
+```
+
+### Example with PEM Strings (Environment Variables)
+
+You can also pass certificate and key content directly as PEM strings, which is useful when loading from environment variables or a secret store.
+
+```C#
+// Load certificates from environment variables
+string certPem = Environment.GetEnvironmentVariable("MTLS_CERT_PEM");
+string keyPem  = Environment.GetEnvironmentVariable("MTLS_KEY_PEM");
+
+MtlsConfig config = MtlsConfig.FromPem(certPem, keyPem);
+
+var request = new GSAuthMtlsRequest(
+    Environment.GetEnvironmentVariable("GIGYA_API_KEY"),
+    "accounts.getAccountInfo",
+    config
+);
+
+request.SetParam("UID", "user123");
+GSResponse response = request.Send();
+```
+
+If the private key is encrypted, pass the password to the `MtlsConfig` factory:
+
+```C#
+MtlsConfig config = MtlsConfig.FromFiles(
+    "certs/client.pem",
+    "certs/client.key",
+    "key-password".ToCharArray()
+);
+```
+
+**Note:** Both the certificate and key must be provided together. Each can be either a file path or PEM content.
 
 ## Limitations
 None
