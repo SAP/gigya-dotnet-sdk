@@ -52,11 +52,30 @@ namespace Gigya.Socialize.SDK
         }
 
         /// <summary>
-        /// Override to ensure mTLS requests always use accounts.gigya.com
+        /// Resolves the mTLS host based on the configured API domain.
+        /// Extracts the datacenter (the first segment before the first dot) from
+        /// <see cref="GSRequest.APIDomain"/> and returns "mtls.{datacenter}.gigya.com".
+        /// Falls back to "mtls.us1.gigya.com" when the domain is unset or has no datacenter segment.
+        /// </summary>
+        public string GetMtlsDomain()
+        {
+            string apiDomain = APIDomain ?? string.Empty;
+            int dotIndex = apiDomain.IndexOf('.');
+            string datacenter = dotIndex > 0 ? apiDomain.Substring(0, dotIndex) : apiDomain;
+            if (string.IsNullOrEmpty(datacenter))
+            {
+                return "mtls.us1.gigya.com";
+            }
+            return "mtls." + datacenter + ".gigya.com";
+        }
+
+        /// <summary>
+        /// Route mTLS requests to the datacenter-specific endpoint
+        /// (e.g. mtls.eu1.gigya.com for an APIDomain of eu1.gigya.com).
         /// </summary>
         protected override string GetRequestDomain(string methodNamespace)
         {
-            return "accounts.gigya.com";
+            return GetMtlsDomain();
         }
 
         /// <summary>
