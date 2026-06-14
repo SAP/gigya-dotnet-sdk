@@ -29,13 +29,21 @@ namespace Gigya.Socialize.SDK
             mtlsConfig.Validate();
         }
         
-        protected override void Sign(string httpMethod, string resourceUri)
+        /// <summary>
+        /// mTLS uses the client certificate as the credential, so don't send oauth_token.
+        /// Only the apiKey is required so the server can identify the site.
+        /// </summary>
+        protected override void SetDefaultParams(string httpMethod, string resourceUri)
         {
-            // Api key is required.
             if (ApiKey != null)
             {
                 SetParam("apiKey", ApiKey);
             }
+        }
+
+        protected override void Sign(string httpMethod, string resourceUri)
+        {
+            // mTLS does not require request signing; the client certificate is the credential.
         }
         
         protected override bool IsValidRequest()
