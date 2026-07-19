@@ -1,175 +1,198 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Net;
+/*
+ * Copyright (C) 2024 SAP SE
+ * Modern .NET 9 SDK - JwtUtils
+ */
+
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
-using System.Web.Script.Serialization;
+using System.Text.Json;
 
-// ReSharper disable MemberCanBePrivate.Global
-// ReSharper disable ClassNeverInstantiated.Global
-// ReSharper disable UnusedAutoPropertyAccessor.Global
+namespace Gigya.Socialize.SDK.Internals;
 
-namespace Gigya.Socialize.SDK.Internals
+/// <summary>
+/// Internal utilities for JWT validation.
+/// </summary>
+internal static class JwtUtils
 {
-    internal class JwtHeader
+    private static readonly HttpClient HttpClient = new();
+    private static readonly Dictionary<string, CachedKey> KeyCache = new();
+    private static readonly object CacheLock = new();
+
+    /// <summary>
+    /// Validates a JWT signature and 'issued at' timestamp.
+    /// </summary>
+    /// <param name="jwt">The JWT token.</param>
+    /// <param name="apiDomain">The API domain the JWT was obtained from.</param>
+    /// <returns>A dictionary of claims if validation succeeds, null otherwise.</returns>
+    public static IDictionary<string, object>? ValidateSignature(string jwt, string apiDomain)
     {
-        public string kid { get; set; }
-    }
-
-    internal class PublicKeyParams
-    {
-        public string n { get; set; }
-        public string e { get; set; }
-    }
-
-    internal class JwtUtils
-    {
-        private static readonly JavaScriptSerializer _deserializer = new JavaScriptSerializer();
-
-        private static readonly Dictionary<string, KeyValuePair<string, DateTime>> _publicKeysCache = new Dictionary<string, KeyValuePair<string, DateTime>>(StringComparer.InvariantCultureIgnoreCase);
-
-        internal static T Deserialize<T>(string sourceBase64) => _deserializer.Deserialize<T>(sourceBase64.FromBase64UrlString().GetString());
-
-        internal static T SafeNoException<T>(Func<T> func)
+        try
         {
-            try
-            {
-                return func();
-            }
-            catch
-            {
-                return default(T);
-            }
-        }
-
-        internal static bool IsTimestampValid(int timestamp, int allowDiffSec)
-        {
-            var unixTimeStartUtc = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-            var offset = DateTime.UtcNow - unixTimeStartUtc.AddSeconds(timestamp);
-            return Math.Abs(offset.TotalSeconds) < allowDiffSec;
-        }
-
-        internal static RSACryptoServiceProvider RSAFromKeyParams(string jwk)
-        {
-            try
-            {
-                var jPubKey = _deserializer.Deserialize<PublicKeyParams>(jwk);
-                var n = jPubKey.n.FromBase64UrlString();
-                var e = jPubKey.e.FromBase64UrlString();
-                var rsa = new RSACryptoServiceProvider();
-                rsa.ImportParameters(new RSAParameters
-                {
-                    Modulus = n,
-                    Exponent = e
-                });
-                return rsa;
-            }
-            catch
-            {
-                // ignored
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Fetch available public key representation validated by the "kid".
-        /// </summary>
-        /// <param name="kid">The keyId</param>
-        /// <param name="apiDomain">The api domain jwt was obtained, for example us1.gigya.com</param>
-        internal static string FetchPublicKey(string kid, string apiDomain)
-        {
-            var resourceUri = $"https://accounts.{apiDomain}/accounts.getJWTPublicKey?V2=true";
-            var request = (HttpWebRequest)WebRequest.Create(resourceUri);
-            request.Timeout = 30_000;
-            request.AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip;
-            request.Method = "GET";
-            request.KeepAlive = false;
-            request.ServicePoint.Expect100Continue = false;
-
-            GSResponse response;
-            using (var webResponse = (HttpWebResponse)request.GetResponse())
-            using (var sr = new StreamReader(webResponse.GetResponseStream(), Encoding.UTF8))
-                response = new GSResponse(method:request.Method, responseText: sr.ReadToEnd(), logSoFar: null);
-
-            if (response.GetErrorCode() == 0)
-            {
-                GSArray keys = response.GetArray("keys", null);
-                
-                if (keys == null || keys.Length == 0)
-                    return null; // Failed to obtain JWK from response data OR data is empty
-
-                foreach (object key in keys)
-                    if (key is GSObject)
-                    {
-                        string jwtKid = ((GSObject)key).GetString("kid", null);
-                        if (jwtKid != null && jwtKid == kid)
-                            return ((GSObject)key).ToJsonString();
-                    }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Validate JWT signature and expiration.
-        /// Pay attention, the public key is cached for 24 hours by kid.
-        /// </summary>
-        /// <param name="jwt"></param>
-        /// <param name="apiDomain">The api domain jwt was obtained, for example us1.gigya.com</param>
-        public static IDictionary<string, object> ValidateSignature(string jwt, string apiDomain)
-        {
-            var segments = jwt.Split('.');
-
-            if (segments.Length != 3)
+            var parts = jwt.Split('.');
+            if (parts.Length != 3)
                 return null;
 
-            var jwtHeader = SafeNoException(() => Deserialize<JwtHeader>(segments[0]));
+            var headerJson = Base64UrlDecode(parts[0]);
+            var payloadJson = Base64UrlDecode(parts[1]);
+            var signature = Base64UrlDecodeBytes(parts[2]);
 
-            string kid = jwtHeader?.kid;
+            var header = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(headerJson);
+            var payload = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(payloadJson);
 
-            if (kid == null)
+            if (header == null || payload == null)
                 return null;
 
-            string publicJWK = null;
-
-            // Try to fetch from cache, check isn't too old, fetch again if
-            if (_publicKeysCache.ContainsKey(kid))
-            {
-                var pair = _publicKeysCache[kid];
-                if (DateTime.UtcNow - pair.Value < TimeSpan.FromDays(1))
-                    publicJWK = pair.Key;
-            }
-
-            if (publicJWK == null)
-                publicJWK = FetchPublicKey(kid, apiDomain);
-
-            if (publicJWK == null)
+            // Get the key ID from header
+            if (!header.TryGetValue("kid", out var kidElement))
+                return null;
+            var kid = kidElement.GetString();
+            if (string.IsNullOrEmpty(kid))
                 return null;
 
-            using (var rsa = RSAFromKeyParams(publicJWK))
+            // Get the algorithm
+            if (!header.TryGetValue("alg", out var algElement))
+                return null;
+            var alg = algElement.GetString();
+            if (alg != "RS256")
+                return null;
+
+            // Get the public key
+            var publicKey = GetPublicKey(apiDomain, kid);
+            if (publicKey == null)
+                return null;
+
+            // Verify signature
+            var dataToVerify = Encoding.UTF8.GetBytes(parts[0] + "." + parts[1]);
+            using var rsa = RSA.Create();
+            rsa.ImportSubjectPublicKeyInfo(publicKey, out _);
+
+            if (!rsa.VerifyData(dataToVerify, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+                return null;
+
+            // Validate 'iat' (issued at) - should not be in the future
+            if (payload.TryGetValue("iat", out var iatElement))
             {
-                if (rsa == null)
-                    return null; // Failed to instantiate PublicKey instance from jwk
-
-                _publicKeysCache[kid] = new KeyValuePair<string, DateTime>(key: publicJWK, value: DateTime.UtcNow);
-
-                var data = Encoding.UTF8.GetBytes(segments[0] + '.' + segments[1]);
-                var signature = segments[2].FromBase64UrlString();
-
-                var valid = rsa.VerifyData(data, "SHA256", signature);
-
-                if (!valid)
-                    return null; // Failed to validate the jwt signature
+                var iat = iatElement.GetInt64();
+                var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                if (iat > now + 300) // Allow 5 minutes clock skew
+                    return null;
             }
 
-            var claims = Deserialize<Dictionary<string, object>>(segments[1]);
-
-            if (!IsTimestampValid((int)claims["iat"], 60 * 2))
-                return null; // Failed to validate the jwt token issued at
+            // Convert payload to dictionary
+            var claims = new Dictionary<string, object>();
+            foreach (var kvp in payload)
+            {
+                claims[kvp.Key] = ConvertJsonElement(kvp.Value);
+            }
 
             return claims;
         }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static byte[]? GetPublicKey(string apiDomain, string kid)
+    {
+        var cacheKey = $"{apiDomain}:{kid}";
+
+        lock (CacheLock)
+        {
+            if (KeyCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+            {
+                return cached.Key;
+            }
+        }
+
+        try
+        {
+            var jwksUrl = $"https://{apiDomain}/accounts.getJWTPublicKey?V2=true";
+            var response = HttpClient.GetStringAsync(jwksUrl).GetAwaiter().GetResult();
+            var jwks = JsonSerializer.Deserialize<JsonElement>(response);
+
+            if (jwks.TryGetProperty("keys", out var keys))
+            {
+                foreach (var key in keys.EnumerateArray())
+                {
+                    if (key.TryGetProperty("kid", out var keyKid) && keyKid.GetString() == kid)
+                    {
+                        if (key.TryGetProperty("n", out var n) && key.TryGetProperty("e", out var e))
+                        {
+                            var modulus = Base64UrlDecodeBytes(n.GetString()!);
+                            var exponent = Base64UrlDecodeBytes(e.GetString()!);
+
+                            using var rsa = RSA.Create();
+                            rsa.ImportParameters(new RSAParameters
+                            {
+                                Modulus = modulus,
+                                Exponent = exponent
+                            });
+
+                            var publicKeyBytes = rsa.ExportSubjectPublicKeyInfo();
+
+                            lock (CacheLock)
+                            {
+                                KeyCache[cacheKey] = new CachedKey
+                                {
+                                    Key = publicKeyBytes,
+                                    ExpiresAt = DateTime.UtcNow.AddHours(1)
+                                };
+                            }
+
+                            return publicKeyBytes;
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+
+        return null;
+    }
+
+    private static string Base64UrlDecode(string input)
+    {
+        var bytes = Base64UrlDecodeBytes(input);
+        return Encoding.UTF8.GetString(bytes);
+    }
+
+    private static byte[] Base64UrlDecodeBytes(string input)
+    {
+        var output = input
+            .Replace('-', '+')
+            .Replace('_', '/');
+
+        switch (output.Length % 4)
+        {
+            case 2: output += "=="; break;
+            case 3: output += "="; break;
+        }
+
+        return Convert.FromBase64String(output);
+    }
+
+    private static object ConvertJsonElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString()!,
+            JsonValueKind.Number when element.TryGetInt64(out var l) => l,
+            JsonValueKind.Number => element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null!,
+            _ => element.GetRawText()
+        };
+    }
+
+    private class CachedKey
+    {
+        public byte[] Key { get; set; } = Array.Empty<byte>();
+        public DateTime ExpiresAt { get; set; }
     }
 }
