@@ -1,1058 +1,1005 @@
 /*
- * Copyright (C) 2011 Gigya, Inc.
+ * Copyright (C) 2024 SAP SE
+ * Modern .NET 9 SDK - GSObject
  */
 
-using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using System.Web;
-using System.Web.Script.Serialization;
 
-namespace Gigya.Socialize.SDK
+namespace Gigya.Socialize.SDK;
+
+/// <summary>  
+/// Used for passing parameters when issuing requests e.g. GSRequest.Send
+/// As well as returning response data e.g. GSResponse.GetData
+/// The dictionary can hold the following types: string, boolean, int, long, Array of GSObjects, GSObject    
+/// </summary>
+[Serializable]
+public class GSObject
 {
-    /// <summary>  
-    /// Used for passing parameters when issueing requests e.g. GSRequest.send
-    /// As well as returning response data e.g. GSResponse.getData
-    /// The dictionary can hold the following types: string, boolean, int, long, Array of GSObjects, GSObject    
+    // Using StringComparer.Ordinal to ensure alphabetic order of keys
+    // (Important when calculating base string for OAuth1 signatures)
+    private readonly SortedDictionary<string, object?> _map = new(StringComparer.Ordinal);
+    private static readonly Dictionary<Type, List<MemberInfo>> TypeCache = new();
+    private static readonly object TypeCacheLock = new();
+
+    #region Constructors
+
+    /// <summary>
+    /// Default constructor.
     /// </summary>
-    /// <remarks>Author: Tamir Korem. Updated by: Yaron Thurm</remarks>
-    [Serializable]
-    public class GSObject
+    public GSObject()
     {
+    }
 
-        // Using StringComparer.Ordinal to ensure alphabetic order of keys (Important when calculating base string for OAuth1 signatures)
-        private JSONObject _map = new JSONObject(StringComparer.Ordinal);
-        private static Dictionary<Type, List<MemberInfo>> _typeCache = new Dictionary<Type, List<MemberInfo>>();
-
-        #region Constructors
-        /// <summary>
-        /// Default constructor
-        /// </summary>
-        public GSObject() { }
-
-        /// <summary>
-        /// Construct a GSObject from json string, anonymous type or any other class via json serialization.
-        /// </summary>
-        public GSObject(object obj)
+    /// <summary>
+    /// Construct a GSObject from a JSON string, anonymous type, or any other class via JSON serialization.
+    /// </summary>
+    /// <param name="obj">The source object (JSON string or object to serialize).</param>
+    public GSObject(object obj)
+    {
+        if (obj is string jsonString)
         {
-            if (null != obj)
-            {
-                if (obj is string)
-                {
-                    ConstructFromJSONString(new JSONObject(obj as string));
-                }
-                else
-                {
-                    ConstructFromTypedClass(obj);
-                }
-            }
+            ConstructFromJsonString(jsonString);
         }
-
-        private void ConstructFromJSONString(JSONObject jsonObj)
+        else if (obj != null)
         {
-            string key;
-            object value;
-            foreach (KeyValuePair<string, object> kvp in jsonObj)
-            {
-                key = kvp.Key;
-                value = kvp.Value;
+            ConstructFromTypedClass(obj);
+        }
+    }
 
+    /// <summary>
+    /// Construct a GSObject from a JSON string.
+    /// </summary>
+    /// <param name="json">The JSON formatted string.</param>
+    /// <exception cref="JsonException">Thrown if unable to parse JSON.</exception>
+    public GSObject(string json)
+    {
+        ConstructFromJsonString(json);
+    }
+
+    private void ConstructFromJsonString(string json)
+    {
+        var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json, options);
+        
+        if (dict == null) return;
+
+        foreach (var kvp in dict)
+        {
+            _map[kvp.Key] = ConvertJsonElement(kvp.Value);
+        }
+    }
+
+    private static object? ConvertJsonElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number when element.TryGetInt32(out var i) => i,
+            JsonValueKind.Number when element.TryGetInt64(out var l) => l,
+            JsonValueKind.Number => element.GetDouble(),
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Object => CreateGSObjectFromElement(element),
+            JsonValueKind.Array => CreateGSArrayFromElement(element),
+            _ => element.GetRawText()
+        };
+    }
+
+    private static GSObject CreateGSObjectFromElement(JsonElement element)
+    {
+        var obj = new GSObject();
+        foreach (var prop in element.EnumerateObject())
+        {
+            obj._map[prop.Name] = ConvertJsonElement(prop.Value);
+        }
+        return obj;
+    }
+
+    private static GSArray CreateGSArrayFromElement(JsonElement element)
+    {
+        var arr = new GSArray();
+        foreach (var item in element.EnumerateArray())
+        {
+            arr.AddInternal(ConvertJsonElement(item));
+        }
+        return arr;
+    }
+
+    private void ConstructFromTypedClass(object obj)
+    {
+        var type = obj.GetType();
+        
+        // Special handling for Dictionary<string, object> and similar types
+        if (obj is System.Collections.IDictionary dict)
+        {
+            foreach (System.Collections.DictionaryEntry entry in dict)
+            {
+                var key = entry.Key?.ToString();
+                if (key == null) continue;
+                
+                var value = entry.Value;
                 if (value == null)
-                    this.Put(key, value); // null values are allowed
-                else if (value is decimal)
-                    this.Put(key, (double)(decimal)value);
+                {
+                    _map[key] = null;
+                }
                 else if (value.GetType().IsPrimitive || value is string)
-                    this.Put(key, value);
-                else if (value is JSONObject) // value itself is a json object
                 {
-                    // Create a new GSObject to put as the value of the current key. the source for this child is the current value
-                    GSObject child = new GSObject((JSONObject)value);
-                    this.Put(key, child);
+                    _map[key] = value;
                 }
-                else if (value is JSONArray) // value is an array
+                else if (value is IEnumerable enumerable and not string and not System.Collections.IDictionary)
                 {
-                    GSArray childArray = new GSArray((JSONArray)value);
-                    this.Put(key, childArray);
-                }
-            }
-        }
-
-        private void ConstructFromTypedClass(object obj)
-        {
-            if (null == obj) return;
-
-            //serialize
-            ReflectObject(obj);
-        }
-
-
-
-        /// <summary>
-        /// Construct a GSObject from json string.
-        /// Throws exception if unable to parse json
-        /// </summary>
-        /// <param name="json">the json formatted string</param>        
-        public GSObject(string json) : this(new JSONObject(json)) { }
-
-        /// <summary>
-        /// Construct a GSObject from a JSONObject - used internally.
-        /// throws exception if unable to parse json
-        /// </summary>
-        /// <param name="jsonObj">the json object to parse</param>
-        internal GSObject(JSONObject jsonObj)
-        {
-            ConstructFromJSONString(jsonObj);
-        }
-
-
-        #endregion
-
-
-        #region - PUTS -
-        /// <summary>
-        ///  Associates the specified value with the specified key in this dictionary. 
-        ///  If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">a string value to be associated with the specified key</param>
-        public GSObject Put(string key, string value)
-        {
-            if (key != null)
-                this._map[key] = value;
-
-            return this;
-        }
-
-        /// <summary>
-        ///  Associates the specified value with the specified key in this dictionary. 
-        ///  If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">an int value to be associated with the specified key </param>
-        public GSObject Put(string key, int value)
-        {
-            if (key != null)
-                this._map[key] = value;
-
-            return this;
-        }
-
-        /// <summary>
-        /// Associates the specified value with the specified key in this dictionary.
-        /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">a long value to be associated with the specified key </param>
-        public GSObject Put(string key, long value)
-        {
-            if (key != null)
-                this._map[key] = value;
-            return this;
-        }
-
-        /// <summary>
-        /// Associates the specified value with the specified key in this dictionary.
-        /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">a bool value to be associated with the specified key</param>
-        public GSObject Put(string key, bool value)
-        {
-            if (key != null)
-                this._map[key] = value;
-            return this;
-        }
-
-        /// <summary>
-        /// Associates the specified value with the specified key in this dictionary.
-        /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">a double value to be associated with the specified key</param>
-        public GSObject Put(string key, double value)
-        {
-            if (key != null)
-                this._map[key] = value;
-            return this;
-        }
-
-        /// <summary>
-        /// Associates the specified value with the specified key in this dictionary. 
-        /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">a GSObject value to be associated with the specified key </param>
-        public GSObject Put(string key, GSObject value)
-        {
-            if (key != null)
-                this._map[key] = value;
-            return this;
-        }
-
-        /// <summary>
-        /// Associates the specified value with the specified key in this dictionary. 
-        /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">a GSObject[] value to be associated with the specified key</param>
-        public GSObject Put(string key, GSArray value)
-        {
-            if (key != null)
-                this._map[key] = value;
-            return this;
-        }
-
-        #endregion
-
-
-        #region - GETS -
-        /* GET BOOL */
-        /// <summary>
-        /// Returns the bool value to which the specified key is mapped, or the 
-        /// defaultValue if this dictionary contains no mapping for the key.
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <param name="defaultValue">the bool value to be returned if this dictionary doesn't contain the specified key.</param>
-        /// <returns>the bool value to which the specified key is mapped, or the defaultValue if 
-        /// this dictionary contains no mapping for the key.</returns>
-        public bool GetBool(string key, bool defaultValue)
-        {
-            bool retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        public bool? GetBool(string key, bool? defaultValue)
-        {
-            bool? retVal = defaultValue;
-            try
-            {
-                retVal = this.GetTypedObject(key, defaultValue, true);
-            }
-            catch { }
-
-            return retVal;
-        }
-
-        /// <summary>
-        /// Returns the bool value to which the specified key is mapped. 
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <returns>the bool value to which the specified key is mapped.</returns>
-        /// <exception cref="Gigya.Socialize.SDK.GSKeyNotFoundException">thrown if the key is not found</exception>
-        /// <exception cref="System.FormatException">thrown if the value cannot be parsed as bool</exception>
-        public bool GetBool(string key)
-        {
-            bool retVal = this.GetTypedObject(key, default(bool), false);
-            return retVal;
-        }
-
-
-        /* GET INTEGER */
-        /// <summary>
-        /// Returns the int value to which the specified key is mapped, or the 
-        /// defaultValue if this dictionary contains no mapping for the key.
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <param name="defaultValue">the int value to be returned if this dictionary doesn't contain the specified key.</param>
-        /// <returns>the int value to which the specified key is mapped, or the defaultValue if 
-        /// this dictionary contains no mapping for the key.</returns>
-        public int GetInt(string key, int defaultValue)
-        {
-            int retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        public int? GetInt(string key, int? defaultValue)
-        {
-            int? retVal = defaultValue;
-            try
-            {
-                retVal = this.GetTypedObject(key, defaultValue, true);
-            }
-            catch { }
-
-            return retVal;
-        }
-        /// <summary>
-        /// Returns the int value to which the specified key is mapped. 
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <returns>the int value to which the specified key is mapped.</returns>
-        /// <exception cref="Gigya.Socialize.SDK.GSKeyNotFoundException">thrown if the key is not found</exception>
-        /// <exception cref="System.FormatException">thrown if the value cannot be parsed as int</exception>
-        public int GetInt(string key)
-        {
-            int retVal = this.GetTypedObject(key, default(int), false);
-            return retVal;
-        }
-
-
-        /* GET LONG */
-        /// <summary>
-        /// Returns the long value to which the specified key is mapped, or the defaultValue
-        /// if this dictionary contains no mapping for the key.
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <param name="defaultValue">the long value to be returned if this dictionary doesn't contain the specified key.</param>
-        /// <returns>the long value to which the specified key is mapped, or the defaultValue if this 
-        /// dictionary contains no mapping for the key</returns>       
-        public long GetLong(string key, long defaultValue)
-        {
-            long retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        public long? GetLong(string key, long? defaultvalue)
-        {
-            long? retVal = defaultvalue;
-            try { retVal = this.GetTypedObject(key, defaultvalue, true); }
-            catch { }
-
-            return retVal;
-        }
-
-        /// <summary>
-        /// Returns the long value to which the specified key is mapped. 
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <returns>the long value to which the specified key is mapped.</returns>
-        /// <exception cref="Gigya.Socialize.SDK.GSKeyNotFoundException">thrown if the key is not found</exception>
-        /// <exception cref="System.FormatException">thrown if the value cannot be parsed as long</exception>
-        public long GetLong(string key)
-        {
-            long retVal = this.GetTypedObject(key, default(long), false);
-            return retVal;
-        }
-
-
-        /* GET DOUBLE */
-        /// <summary>
-        /// Returns the double value to which the specified key is mapped, or the defaultValue
-        /// if this dictionary contains no mapping for the key.
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <param name="defaultValue">the double value to be returned if this dictionary doesn't contain the specified key.</param>
-        /// <returns>the double value to which the specified key is mapped, or the defaultValue if this 
-        /// dictionary contains no mapping for the key</returns>       
-        public double GetDouble(string key, double defaultValue)
-        {
-            double retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        public double? GetDouble(string key, double? defaultValue)
-        {
-            double? retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        /// <summary>
-        /// Returns the double value to which the specified key is mapped. 
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <returns>the double value to which the specified key is mapped.</returns>
-        /// <exception cref="Gigya.Socialize.SDK.GSKeyNotFoundException">thrown if the key is not found</exception>
-        /// <exception cref="System.FormatException">thrown if the value cannot be parsed as long</exception>
-        public double GetDouble(string key)
-        {
-            double retVal = this.GetTypedObject(key, default(double), false);
-            return retVal;
-        }
-
-
-        /* GET STRING */
-        /// <summary>
-        /// Returns the string value to which the specified key is mapped, or the defaultValue
-        /// if this dictionary contains no mapping for the key.
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <param name="defaultValue">the string value to be returned if this dictionary doesn't contain the specified key.</param>
-        /// <returns>the string value to which the specified key is mapped, or the defaultValue if this 
-        /// dictionary contains no mapping for the key</returns>
-        public string GetString(string key, string defaultValue)
-        {
-            string retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        /// <summary>
-        /// Returns the string value to which the specified key is mapped. 
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <returns>the string value to which the specified key is mapped.</returns>
-        /// <exception cref="Gigya.Socialize.SDK.GSKeyNotFoundException">thrown if the key is not found</exception>
-        public string GetString(string key)
-        {
-            string retVal = this.GetTypedObject<string>(key, null, false);
-            return retVal;
-        }
-
-
-        /* GET GSOBJECT */
-        public T GetObject<T>(string key) where T : class,new()
-        {
-            GSObject obj = GetObject(key, null);
-            if (null != obj)
-                return obj.Cast<T>();
-
-            return default(T);
-        }
-
-        /// <summary>
-        /// Returns the GSObject value to which the specified key is mapped, or the defaultValue
-        /// if this dictionary contains no mapping for the key.
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <param name="defaultValue">the GSObject value to be returned if this dictionary doesn't contain the specified key.</param>
-        /// <returns>the GSObject value to which the specified key is mapped, or the defaultValue if this 
-        /// dictionary contains no mapping for the key</returns>
-        public GSObject GetObject(string key, GSObject defaultValue)
-        {
-            GSObject retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        /// <summary>
-        /// Returns the GSObject value to which the specified key is mapped. 
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <returns>the GSObject value to which the specified key is mapped.</returns>
-        /// <exception cref="Gigya.Socialize.SDK.GSKeyNotFoundException">thrown if the key is not found</exception>
-        /// <exception cref="System.InvalidCastException">thrown if the value cannot be cast to GSObject</exception>
-        public GSObject GetObject(string key)
-        {
-            GSObject retVal = this.GetTypedObject<GSObject>(key, null, false);
-            return retVal;
-        }
-
-
-        /* GET GSOBJECT[] */
-        public IEnumerable<T> GetArray<T>(string key) where T : class,new()
-        {
-            GSArray array = GetArray(key);
-            return array.Cast<T>();
-        }
-        /// <summary>
-        /// Returns the GSObject[] value to which the specified key is mapped, or the defaultValue
-        /// if this dictionary contains no mapping for the key.
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <param name="defaultValue">the GSObject[] value to be returned if this dictionary doesn't contain the specified key.</param>
-        /// <returns>the GSObject[] value to which the specified key is mapped, or the defaultValue if this 
-        /// dictionary contains no mapping for the key</returns>
-        public GSArray GetArray(string key, GSArray defaultValue)
-        {
-            GSArray retVal = defaultValue;
-            try { retVal = this.GetTypedObject(key, defaultValue, true); }
-            catch { }
-
-            return retVal;
-        }
-        /// <summary>
-        /// Returns the GSObject[] value to which the specified key is mapped. 
-        /// </summary>
-        /// <param name="key">the key whose associated value is to be returned</param>
-        /// <returns>the GSObject[] value to which the specified key is mapped.</returns>
-        /// <exception cref="Gigya.Socialize.SDK.GSKeyNotFoundException">thrown if the key is not found</exception>
-        /// <exception cref="System.InvalidCastException">thrown if the value cannot be cast to GSObject[]</exception>
-        public GSArray GetArray(string key)
-        {
-            GSArray retVal = this.GetTypedObject<GSArray>(key, null, false);
-            return retVal;
-        }
-
-        #endregion
-
-
-        #region Other public methods
-        /// <summary>
-        /// Returns true if this dictionary contains a mapping for the specified key.
-        /// </summary>
-        /// <param name="key">key whose presence in this map is to be tested</param>
-        /// <returns>true if this map contains a mapping for the specified key</returns>
-        public bool ContainsKey(string key)
-        {
-            return this._map.ContainsKey(key);
-        }
-
-        /// <summary>
-        /// Parse parameters from URL into the dictionary
-        /// </summary>
-        /// <param name="url">the URL string to parse</param>
-        public void ParseURL(string url)
-        {
-            try
-            {
-                Uri u = new Uri(url);
-
-                // Parse the query string part of the uri
-                this.ParseQuerystring(u.Query);
-
-                // Parse the fragment part of the uri
-                this.ParseQuerystring(u.Fragment);
-            }
-            catch (UriFormatException) { }
-        }
-
-        /// <summary>
-        /// Parse parameters from query string
-        /// </summary>
-        /// <param name="qs">The query string to parse</param>
-        public void ParseQuerystring(string qs)
-        {
-            if (qs == null) return;
-
-            if (qs.StartsWith("?")) qs = qs.Remove(0, "?".Length); // Remove QuestionMark before query string
-            if (qs.StartsWith("#")) qs = qs.Remove(0, "#".Length); // Remove Pound sign before fragment part
-
-            string[] array = qs.Split('&');
-            foreach (string parameter in array)
-            {
-                int indexOf = parameter.IndexOf("=");
-                if (indexOf == -1) continue;
-                string key = parameter.Substring(0, indexOf);
-                string value = parameter.Substring(indexOf + 1);
-                try
-                {
-                    this.Put(key, HttpUtility.UrlDecode(value, Encoding.UTF8));
-                }
-                catch (Exception) { }
-            }
-        }
-
-        /// <summary>
-        /// Removes the key (and its corresponding value) from this dictionary. 
-        /// This method does nothing if the key is not in this dictionary.  
-        /// </summary>
-        /// <param name="key">the key that needs to be removed.</param>
-        public void Remove(string key)
-        {
-            this._map.Remove(key);
-        }
-
-        /// <summary>
-        /// Removes all of the entries from this dictionary. The dictionary will be empty after this call returns. 
-        /// </summary>
-        public void Clear()
-        {
-            this._map.Clear();
-        }
-
-        /// <summary>
-        /// Returns a String array containing the keys in this dictionary. 
-        /// </summary>
-        /// <returns>a KeyCollection of the keys in this dictionary.</returns>
-        public SortedDictionary<string, object>.KeyCollection GetKeys()
-        {
-            return this._map.Keys;
-        }
-
-        /// <summary>
-        /// Returns the dictionary's content as a JSON string. 
-        /// </summary>
-        /// <returns>the dictionary's content as a JSON string.</returns>
-        public override string ToString()
-        {
-            return this.ToJsonObject().ToString();
-        }
-
-        /// <summary>
-        /// Returns the dictionary's content as a JSON string. 
-        /// </summary>
-        /// <returns>the dictionary's content as a JSON string.</returns>
-        public string ToJsonString()
-        {
-            return this.ToString();
-        }
-
-        /// <summary>
-        /// Returns a deep clone of the current instance
-        /// </summary>
-        /// <returns></returns>
-        public GSObject Clone()
-        {
-            System.Runtime.Serialization.Formatters.Binary.BinaryFormatter formater = null;
-            System.IO.MemoryStream stream = null;
-            GSObject ret = null;
-            try
-            {
-                // Serialize object
-                formater = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
-                stream = new System.IO.MemoryStream();
-                formater.Serialize(stream, this);
-
-                // Deserialize it
-                stream.Position = 0;
-                ret = (GSObject)formater.Deserialize(stream);
-            }
-            catch (Exception)
-            {
-                if (stream != null)
-                    stream.Close();
-            }
-
-            return ret;
-        }
-        #endregion
-
-        #region Cast
-        public T Cast<T>() where T : class,new()
-        {
-            return (T)Cast(typeof(T));
-        }
-
-        internal object Cast(Type requestedType)
-        {
-            object instance = Activator.CreateInstance(requestedType);
-            List<MemberInfo> members = GetTypeMembers(requestedType);
-
-            foreach (MemberInfo member in members)
-            {
-                object value;
-                this._map.TryGetValue(member.Name, out value);
-                if (value == null)
-                {
-                    //can skip it if we want to support default values
-                    SetMemberInfo(instance, member, value);
-                }
-                else
-                {
-                    Type typeOfValue = value.GetType();
-                    bool canSet = false;
-                    Type memberType = GetMemberType(member);
-                    if (memberType.IsValueType || memberType == typeof(String))
+                    var gsArr = new GSArray();
+                    foreach (var item in enumerable)
                     {
-                        bool isNullable = false;
-                        Type underlayingType = Nullable.GetUnderlyingType(memberType);
-                        isNullable = null != underlayingType;
-
-                        canSet = typeOfValue == GetMemberType(member);
-
-                        //if the value type is not equals to the member type then try to convert to the requested type.
-                        if (!canSet)
+                        if (item == null)
                         {
-                            if (typeOfValue != typeof(String))
-                            {
-                                canSet = true;
-                                value = value.ToString();
-                            }
-
-                            // try yo convert to the requested type.
-                            else
-                            {
-                                canSet = (isNullable ? underlayingType : requestedType).GetInterfaces().Contains(typeof(IConvertible));
-                                if (canSet)
-                                    value = Convert.ChangeType(value, memberType);
-                            }
+                            gsArr.AddInternal(null);
                         }
-
-                    }
-                    else if (value is GSObject)
-                    {
-                        value = (value as GSObject).Cast(memberType);
-                        canSet = true;
-                    }
-                    else if (value is GSArray && memberType.GetInterfaces().Contains(typeof(IList)))
-                    {
-                        value = (value as GSArray).Cast(memberType);
-                        canSet = true;
-                    }
-
-                    if (!canSet)
-                    {
-                        throw new NotSupportedException("type " + memberType + " is not supported");
-                    }
-                    else
-                    {
-                        SetMemberInfo(instance, member, value);
-                    }
-                }
-            }
-
-            return instance;
-
-        }
-
-        #endregion
-
-
-
-        #region Inner Classes
-        [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
-        public sealed class IgnoreAttribute : Attribute
-        {
-            public IgnoreAttribute() { }
-        }
-
-        #endregion
-
-
-        #region Private Methods
-
-        /// <summary>
-        /// Associates the specified value with the specified key in this dictionary. 
-        /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
-        /// Only for private use by this class
-        /// </summary>
-        /// <param name="key">key with which the specified value is to be associated</param>
-        /// <param name="value">an object value to be associated with the specified key</param>      
-        private void Put(string key, object value)
-        {
-            if (key == null) return;
-            this._map[key] = value;
-        }
-
-        /// <summary>
-        /// Returns the value for a given key. 
-        /// If the key is not found then:
-        /// If the useDefaultValue is true, then the defaultValue is return, otherwise a key not found exception is thrown.
-        /// If the key is found then:
-        /// If the object value can be parsed according to the type requested, it is returned after parsing.
-        /// If parsing fails, then a FormatException exception is thrown
-        /// </summary>
-        /// <param name="key">the key to search for</param>
-        /// <param name="defaultValue">value to return if key is not found</param>
-        /// <param name="useDefaultValue">whether or not to use the defaultValue if key is not found</param>
-        /// <returns></returns>                
-        private T GetTypedObject<T>(string key, T defaultValue, bool useDefaultValue)
-        {
-            object val;
-            // Search for the key
-            if (this._map.TryGetValue(key, out val) /* key was found */)
-            {
-                if (val == null) return (T)val;
-
-                Type t = typeof(T);
-                if (t == typeof(string))
-                    val = val.ToString();
-                else if (val.GetType() == typeof(string))
-                {
-                    string st = val as string;
-                    if (t == typeof(int))
-                        val = int.Parse(st);
-                    else if (t == typeof(long))
-                        val = long.Parse(st);
-                    else if (t == typeof(bool))
-                        val = bool.Parse(st);
-                    else if (t == typeof(double))
-                        val = double.Parse(st);
-                    else if (t == typeof(decimal))
-                        val = decimal.Parse(st);
-                }
-
-                return (T)val;
-            }
-            else /* key couldn't be found */
-            {
-                if (useDefaultValue)
-                    return defaultValue;
-                else
-                    throw new GSKeyNotFoundException("GSObject does not contain a value for key " + key);
-            }
-        }
-
-        internal JSONObject ToJsonObject()
-        {
-            JSONObject ret = new JSONObject();
-            foreach (var obj in this._map)
-            {
-                string key = obj.Key;
-                object val = obj.Value;
-                if (val is GSObject)
-                {
-                    ret[key] = ((GSObject)val).ToJsonObject();
-                }
-                else if (val is GSArray)
-                {
-                    ret[key] = ((GSArray)val).ToJsonArray();
-                }
-                else
-                {
-                    ret[key] = val;
-                }
-            }
-            return ret;
-        }
-
-        protected SortedDictionary<string, object> Map { get { return _map.ToSortedDictionary(); } }
-
-
-        internal IEnumerable<T> Get<T>(string[] path, int pos, bool attempt_conversion)
-        {
-            object value;
-            if (_map.TryGetValue(path[pos], out value))
-                return Get<T>(path, pos, value, attempt_conversion);
-            else return Enumerable.Empty<T>();
-        }
-
-
-        static internal IEnumerable<T> Get<T>(string[] path, int pos, object value, bool attempt_conversion)
-        {
-            // End of the path -- return a value
-            if (pos == path.Length - 1)
-            {
-
-                // value matches the requested type; return it. Note that nullables are also matched, i.e. int == int?
-                if (value is T)
-                    yield return (T)value;
-
-                // if the value is null and the requested data type is a non-value, return null
-                else if (value == null && default(T) == null)
-                    yield return default(T);
-
-                // if the type requested is a string and conversions are allowed, then serialize the value
-                else if (attempt_conversion && typeof(T) == typeof(string))
-                    yield return (T)(object)value.ToString();
-
-                // if both the value and requested type are primitives (or nullable primitives) and conversions are allowed, try a conversion
-                else if (attempt_conversion && value is IConvertible)
-                {
-                    Type base_type = Nullable.GetUnderlyingType(typeof(T));
-
-                    if ((base_type ?? typeof(T)).GetInterfaces().Contains(typeof(IConvertible)))
-                    {
-                        object converted = null;
-                        try { converted = Convert.ChangeType(value, base_type ?? typeof(T)); }
-                        catch { }
-                        if (converted != null)
-                            yield return (T)converted;
-                    }
-                }
-
-            }
-
-            // More elements in the path and the current element is an object; pass the rest of the path to that object
-            else if (value is GSObject)
-                foreach (var result in ((GSObject)value).Get<T>(path, pos + 1, attempt_conversion))
-                    yield return result;
-
-            // More elements in the path and the current element is an array; pass the rest of the path to that array
-            else if (value is GSArray)
-                foreach (var result in ((GSArray)value).Get<T>(path, pos + 1, attempt_conversion))
-                    yield return result;
-        }
-
-        private void ReflectObject(object clientParams)
-        {
-            Type clientParamsType = clientParams.GetType();
-            List<MemberInfo> members = GetTypeMembers(clientParamsType);
-
-            foreach (MemberInfo member in members)
-            {
-                object value = GetMemberValue(clientParams, member);
-
-                String memberName = member.Name;
-                if (null == value)
-                    this.Put(memberName, value);
-                else
-                {
-                    Type type = value.GetType();
-                    if (type.IsPrimitive || type == typeof(String))
-                    {
-                        this.Put(memberName, value);
-                    }
-                    else if (value is IEnumerable)
-                    {
-                        IEnumerable enu = value as IEnumerable;
-                        GSArray gsArr = new GSArray();
-                        foreach (object obj in enu)
+                        else if (item.GetType().IsPrimitive || item is string)
                         {
-                            if (null == obj)
-                            {
-                                gsArr.Add(null as Object);
-                            }
-                            else
-                            {
-                                Type arrItemType = obj.GetType();
-                                if (arrItemType == typeof(String) || arrItemType.IsPrimitive)
-                                {
-                                    gsArr.Add(obj);
-                                }
-                                else
-                                {
-                                    GSObject gsObjArrItem = new GSObject(obj);
-                                    gsArr.Add(gsObjArrItem);
-                                }
-                            }
-                        }
-                        this.Put(memberName, gsArr);
-                    }
-
-                    else if (type.IsClass)
-                    {
-                        value = new GSObject(value);
-                        this.Put(memberName, value);
-                    }
-                }
-            }
-        }
-
-        #region Helpers
-
-        private static bool IsAnonymousType(Type type)
-        {
-            Boolean hasCompilerGeneratedAttribute = type.GetCustomAttributes(typeof(CompilerGeneratedAttribute), false).Count() > 0;
-            Boolean nameContainsAnonymousType = type.FullName.Contains("AnonymousType");
-            Boolean isAnonymousType = hasCompilerGeneratedAttribute && nameContainsAnonymousType;
-
-            return isAnonymousType;
-        }
-
-        private static List<MemberInfo> GetTypeMembers(Type type)
-        {
-            List<MemberInfo> members;
-            if (!_typeCache.TryGetValue(type, out members))
-            {
-                lock (_typeCache)
-                {
-                    if (!_typeCache.TryGetValue(type, out members))
-                    {
-                        PropertyInfo[] propertyInfos;
-                        members = new List<MemberInfo>();
-
-                        if (IsAnonymousType(type))
-                        {
-                            propertyInfos = type.GetProperties();
+                            gsArr.AddInternal(item);
                         }
                         else
                         {
-                            Type ignoreAttrType = typeof(IgnoreAttribute);
-                            propertyInfos = type.GetProperties()
-                                                            .Where(x => !x.IsDefined(ignoreAttrType, true))
-                                                            .Where(x => x.CanRead && x.CanWrite)
-                                                            .ToArray();
-
-                            FieldInfo[] memberInfos = type.GetFields()
-                                                            .Where(x => !x.IsDefined(ignoreAttrType, true)).ToArray();
-
-                            members.AddRange(memberInfos.Cast<MemberInfo>());
+                            gsArr.Add(new GSObject(item));
                         }
-
-                        members.AddRange(propertyInfos.Cast<MemberInfo>());
-                        _typeCache[type] = members;
                     }
+                    _map[key] = gsArr;
+                }
+                else if (value.GetType().IsClass)
+                {
+                    _map[key] = new GSObject(value);
                 }
             }
-            return members;
+            return;
         }
+        
+        var members = GetTypeMembers(type);
 
-        private static object GetMemberValue(object instance, MemberInfo member)
+        foreach (var member in members)
         {
-            if (member is FieldInfo)
-                return ((FieldInfo)member).GetValue(instance);
-            else
-                return ((PropertyInfo)member).GetValue(instance, null);
-        }
+            var value = GetMemberValue(obj, member);
+            var memberName = member.Name;
 
-        private static void SetMemberInfo(object instance, MemberInfo member, object value)
-        {
-            if (member is FieldInfo)
-                ((FieldInfo)member).SetValue(instance, value);
-            else
-                ((PropertyInfo)member).SetValue(instance, value, null);
-        }
-
-        private static Type GetMemberType(MemberInfo member)
-        {
-            if (member is FieldInfo)
-                return ((FieldInfo)member).FieldType;
-            else
-                return ((PropertyInfo)member).PropertyType;
-        }
-
-        #endregion
-
-        #endregion
-
-
-
-    }
-
-
-    [Serializable]
-    internal class JSONObject : SortedDictionary<string, object>
-    {
-        public JSONObject() { }
-
-        public JSONObject(StringComparer comparer) : base(comparer) { }
-
-        public JSONObject(string json) : this(Deserialize(json)) { }
-
-        public JSONObject(Dictionary<string, object> jsonObj)
-        {
-            if (jsonObj != null)
+            if (value == null)
             {
-                foreach (var obj in jsonObj)
+                _map[memberName] = null;
+            }
+            else if (value.GetType().IsPrimitive || value is string)
+            {
+                _map[memberName] = value;
+            }
+            else if (value is IEnumerable enumerable and not string)
+            {
+                var gsArr = new GSArray();
+                foreach (var item in enumerable)
                 {
-                    if (obj.Value is Dictionary<string, object>)
+                    if (item == null)
                     {
-                        this[obj.Key] = new JSONObject((Dictionary<string, object>)obj.Value);
+                        gsArr.AddInternal(null);
                     }
-                    else if (obj.Value is object[])
+                    else if (item.GetType().IsPrimitive || item is string)
                     {
-                        this[obj.Key] = new JSONArray((object[])obj.Value);
+                        gsArr.AddInternal(item);
                     }
                     else
-                        this[obj.Key] = obj.Value;
+                    {
+                        gsArr.Add(new GSObject(item));
+                    }
                 }
+                _map[memberName] = gsArr;
             }
-        }
-
-        static Dictionary<string, object> Deserialize(string json)
-        {
-            JavaScriptSerializer ds = new JavaScriptSerializer();
-            ds.MaxJsonLength = (int)GSRequest.MaxResponseSize;
-            return (Dictionary<string, object>)ds.DeserializeObject(json);
-        }
-
-        internal SortedDictionary<string, object> ToSortedDictionary()
-        {
-            SortedDictionary<string, object> ret = new SortedDictionary<string, object>();
-            foreach (var obj in this)
+            else if (value.GetType().IsClass)
             {
-                string key = obj.Key;
-                object val = obj.Value;
-                if (val is JSONObject)
-                {
-                    ret[key] = ((JSONObject)val).ToSortedDictionary();
-                }
-                else if (val is JSONArray)
-                {
-                    ret[key] = ((JSONArray)val).ToObjectArray();
-                }
-                else
-                {
-                    ret[key] = val;
-                }
+                _map[memberName] = new GSObject(value);
             }
-            return ret;
-        }
-
-        public override string ToString()
-        {
-            SortedDictionary<string, object> obj = this.ToSortedDictionary();
-            var serializer = new JavaScriptSerializer();
-            serializer.MaxJsonLength = (int)GSRequest.MaxResponseSize;
-            string ret = serializer.Serialize(obj);
-            return ret;
         }
     }
+
+    #endregion
+
+    #region Put Methods
+
+    /// <summary>
+    /// Associates the specified value with the specified key in this dictionary. 
+    /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
+    /// </summary>
+    /// <param name="key">Key with which the specified value is to be associated.</param>
+    /// <param name="value">A string value to be associated with the specified key.</param>
+    /// <returns>This GSObject for method chaining.</returns>
+    public GSObject Put(string key, string? value)
+    {
+        if (key != null)
+            _map[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Associates the specified value with the specified key in this dictionary. 
+    /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
+    /// </summary>
+    /// <param name="key">Key with which the specified value is to be associated.</param>
+    /// <param name="value">An int value to be associated with the specified key.</param>
+    /// <returns>This GSObject for method chaining.</returns>
+    public GSObject Put(string key, int value)
+    {
+        if (key != null)
+            _map[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Associates the specified value with the specified key in this dictionary. 
+    /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
+    /// </summary>
+    /// <param name="key">Key with which the specified value is to be associated.</param>
+    /// <param name="value">A long value to be associated with the specified key.</param>
+    /// <returns>This GSObject for method chaining.</returns>
+    public GSObject Put(string key, long value)
+    {
+        if (key != null)
+            _map[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Associates the specified value with the specified key in this dictionary. 
+    /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
+    /// </summary>
+    /// <param name="key">Key with which the specified value is to be associated.</param>
+    /// <param name="value">A bool value to be associated with the specified key.</param>
+    /// <returns>This GSObject for method chaining.</returns>
+    public GSObject Put(string key, bool value)
+    {
+        if (key != null)
+            _map[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Associates the specified value with the specified key in this dictionary. 
+    /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
+    /// </summary>
+    /// <param name="key">Key with which the specified value is to be associated.</param>
+    /// <param name="value">A double value to be associated with the specified key.</param>
+    /// <returns>This GSObject for method chaining.</returns>
+    public GSObject Put(string key, double value)
+    {
+        if (key != null)
+            _map[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Associates the specified value with the specified key in this dictionary. 
+    /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
+    /// </summary>
+    /// <param name="key">Key with which the specified value is to be associated.</param>
+    /// <param name="value">A GSObject value to be associated with the specified key.</param>
+    /// <returns>This GSObject for method chaining.</returns>
+    public GSObject Put(string key, GSObject? value)
+    {
+        if (key != null)
+            _map[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Associates the specified value with the specified key in this dictionary. 
+    /// If the dictionary previously contained a mapping for the key, the old value is replaced by the specified value.
+    /// </summary>
+    /// <param name="key">Key with which the specified value is to be associated.</param>
+    /// <param name="value">A GSArray value to be associated with the specified key.</param>
+    /// <returns>This GSObject for method chaining.</returns>
+    public GSObject Put(string key, GSArray? value)
+    {
+        if (key != null)
+            _map[key] = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Internal method to put any object value.
+    /// </summary>
+    internal void PutInternal(string key, object? value)
+    {
+        if (key != null)
+            _map[key] = value;
+    }
+
+    #endregion
+
+    #region Get Methods (with default)
+
+    /// <summary>
+    /// Returns the bool value to which the specified key is mapped, or the 
+    /// defaultValue if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The bool value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The bool value to which the specified key is mapped, or the defaultValue if 
+    /// this dictionary contains no mapping for the key.</returns>
+    public bool GetBool(string key, bool defaultValue)
+    {
+        try { return GetTypedValue<bool>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the nullable bool value to which the specified key is mapped, or the 
+    /// defaultValue if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The bool value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The bool value to which the specified key is mapped, or the defaultValue if 
+    /// this dictionary contains no mapping for the key.</returns>
+    public bool? GetBool(string key, bool? defaultValue)
+    {
+        try { return GetTypedValue<bool?>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the int value to which the specified key is mapped, or the 
+    /// defaultValue if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The int value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The int value to which the specified key is mapped, or the defaultValue if 
+    /// this dictionary contains no mapping for the key.</returns>
+    public int GetInt(string key, int defaultValue)
+    {
+        try { return GetTypedValue<int>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the nullable int value to which the specified key is mapped, or the 
+    /// defaultValue if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The int value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The int value to which the specified key is mapped, or the defaultValue if 
+    /// this dictionary contains no mapping for the key.</returns>
+    public int? GetInt(string key, int? defaultValue)
+    {
+        try { return GetTypedValue<int?>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the long value to which the specified key is mapped, or the defaultValue
+    /// if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The long value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The long value to which the specified key is mapped, or the defaultValue if this 
+    /// dictionary contains no mapping for the key.</returns>
+    public long GetLong(string key, long defaultValue)
+    {
+        try { return GetTypedValue<long>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the nullable long value to which the specified key is mapped, or the defaultValue
+    /// if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The long value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The long value to which the specified key is mapped, or the defaultValue if this 
+    /// dictionary contains no mapping for the key.</returns>
+    public long? GetLong(string key, long? defaultValue)
+    {
+        try { return GetTypedValue<long?>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the double value to which the specified key is mapped, or the defaultValue
+    /// if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The double value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The double value to which the specified key is mapped, or the defaultValue if this 
+    /// dictionary contains no mapping for the key.</returns>
+    public double GetDouble(string key, double defaultValue)
+    {
+        try { return GetTypedValue<double>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the nullable double value to which the specified key is mapped, or the defaultValue
+    /// if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The double value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The double value to which the specified key is mapped, or the defaultValue if this 
+    /// dictionary contains no mapping for the key.</returns>
+    public double? GetDouble(string key, double? defaultValue)
+    {
+        try { return GetTypedValue<double?>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the string value to which the specified key is mapped, or the defaultValue
+    /// if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The string value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The string value to which the specified key is mapped, or the defaultValue if this 
+    /// dictionary contains no mapping for the key.</returns>
+    public string? GetString(string key, string? defaultValue)
+    {
+        try { return GetTypedValue<string?>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the GSObject value to which the specified key is mapped, or the defaultValue
+    /// if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The GSObject value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The GSObject value to which the specified key is mapped, or the defaultValue if this 
+    /// dictionary contains no mapping for the key.</returns>
+    public GSObject? GetObject(string key, GSObject? defaultValue)
+    {
+        try { return GetTypedValue<GSObject?>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    /// <summary>
+    /// Returns the GSArray value to which the specified key is mapped, or the defaultValue
+    /// if this dictionary contains no mapping for the key.
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <param name="defaultValue">The GSArray value to be returned if this dictionary doesn't contain the specified key.</param>
+    /// <returns>The GSArray value to which the specified key is mapped, or the defaultValue if this 
+    /// dictionary contains no mapping for the key.</returns>
+    public GSArray? GetArray(string key, GSArray? defaultValue)
+    {
+        try { return GetTypedValue<GSArray?>(key, defaultValue, true); }
+        catch { return defaultValue; }
+    }
+
+    #endregion
+
+    #region Get Methods (throwing)
+
+    /// <summary>
+    /// Returns the bool value to which the specified key is mapped. 
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The bool value to which the specified key is mapped.</returns>
+    /// <exception cref="GSKeyNotFoundException">Thrown if the key is not found.</exception>
+    /// <exception cref="FormatException">Thrown if the value cannot be parsed as bool.</exception>
+    public bool GetBool(string key) => GetTypedValue<bool>(key, default, false);
+
+    /// <summary>
+    /// Returns the int value to which the specified key is mapped. 
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The int value to which the specified key is mapped.</returns>
+    /// <exception cref="GSKeyNotFoundException">Thrown if the key is not found.</exception>
+    /// <exception cref="FormatException">Thrown if the value cannot be parsed as int.</exception>
+    public int GetInt(string key) => GetTypedValue<int>(key, default, false);
+
+    /// <summary>
+    /// Returns the long value to which the specified key is mapped. 
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The long value to which the specified key is mapped.</returns>
+    /// <exception cref="GSKeyNotFoundException">Thrown if the key is not found.</exception>
+    /// <exception cref="FormatException">Thrown if the value cannot be parsed as long.</exception>
+    public long GetLong(string key) => GetTypedValue<long>(key, default, false);
+
+    /// <summary>
+    /// Returns the double value to which the specified key is mapped. 
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The double value to which the specified key is mapped.</returns>
+    /// <exception cref="GSKeyNotFoundException">Thrown if the key is not found.</exception>
+    /// <exception cref="FormatException">Thrown if the value cannot be parsed as double.</exception>
+    public double GetDouble(string key) => GetTypedValue<double>(key, default, false);
+
+    /// <summary>
+    /// Returns the string value to which the specified key is mapped. 
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The string value to which the specified key is mapped.</returns>
+    /// <exception cref="GSKeyNotFoundException">Thrown if the key is not found.</exception>
+    public string GetString(string key) => GetTypedValue<string>(key, null!, false)!;
+
+    /// <summary>
+    /// Returns the GSObject value to which the specified key is mapped. 
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The GSObject value to which the specified key is mapped.</returns>
+    /// <exception cref="GSKeyNotFoundException">Thrown if the key is not found.</exception>
+    /// <exception cref="InvalidCastException">Thrown if the value cannot be cast to GSObject.</exception>
+    public GSObject GetObject(string key) => GetTypedValue<GSObject>(key, null!, false)!;
+
+    /// <summary>
+    /// Returns the GSArray value to which the specified key is mapped. 
+    /// </summary>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The GSArray value to which the specified key is mapped.</returns>
+    /// <exception cref="GSKeyNotFoundException">Thrown if the key is not found.</exception>
+    /// <exception cref="InvalidCastException">Thrown if the value cannot be cast to GSArray.</exception>
+    public GSArray GetArray(string key) => GetTypedValue<GSArray>(key, null!, false)!;
+
+    #endregion
+
+    #region Generic Get Methods
+
+    /// <summary>
+    /// Returns the typed object value to which the specified key is mapped.
+    /// </summary>
+    /// <typeparam name="T">The type to cast to.</typeparam>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>The typed object.</returns>
+    public T? GetObject<T>(string key) where T : class, new()
+    {
+        var obj = GetObject(key, null);
+        return obj?.Cast<T>();
+    }
+
+    /// <summary>
+    /// Returns the typed array to which the specified key is mapped.
+    /// </summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="key">The key whose associated value is to be returned.</param>
+    /// <returns>An enumerable of typed objects.</returns>
+    public IEnumerable<T> GetArray<T>(string key) where T : class, new()
+    {
+        var array = GetArray(key);
+        return array.Cast<T>();
+    }
+
+    /// <summary>
+    /// Gets one or more nested objects using a path expression.
+    /// </summary>
+    /// <typeparam name="T">The type of the object(s) to obtain.</typeparam>
+    /// <param name="path">A dot-delimited path down the objects hierarchy.</param>
+    /// <param name="attemptConversion">If true, attempt type conversions.</param>
+    /// <returns>A list of values which match the path.</returns>
+    public IEnumerable<T> Get<T>(string path, bool attemptConversion = false)
+    {
+        var tokens = TokenizePath(path);
+        return GetInternal<T>(tokens, 0, attemptConversion);
+    }
+
+    #endregion
+
+    #region Utility Methods
+
+    /// <summary>
+    /// Returns true if this dictionary contains a mapping for the specified key.
+    /// </summary>
+    /// <param name="key">Key whose presence in this map is to be tested.</param>
+    /// <returns>True if this map contains a mapping for the specified key.</returns>
+    public bool ContainsKey(string key) => _map.ContainsKey(key);
+
+    /// <summary>
+    /// Parse parameters from URL into the dictionary.
+    /// </summary>
+    /// <param name="url">The URL string to parse.</param>
+    public void ParseURL(string url)
+    {
+        try
+        {
+            var u = new Uri(url);
+            ParseQuerystring(u.Query);
+            ParseQuerystring(u.Fragment);
+        }
+        catch (UriFormatException)
+        {
+            // Ignore invalid URLs
+        }
+    }
+
+    /// <summary>
+    /// Parse parameters from query string.
+    /// </summary>
+    /// <param name="qs">The query string to parse.</param>
+    public void ParseQuerystring(string? qs)
+    {
+        if (string.IsNullOrEmpty(qs)) return;
+
+        if (qs.StartsWith("?")) qs = qs[1..];
+        if (qs.StartsWith("#")) qs = qs[1..];
+
+        var pairs = qs.Split('&');
+        foreach (var parameter in pairs)
+        {
+            var indexOf = parameter.IndexOf('=');
+            if (indexOf == -1) continue;
+            
+            var key = parameter[..indexOf];
+            var value = parameter[(indexOf + 1)..];
+            
+            try
+            {
+                Put(key, HttpUtility.UrlDecode(value, Encoding.UTF8));
+            }
+            catch
+            {
+                // Ignore parsing errors
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes the key (and its corresponding value) from this dictionary. 
+    /// This method does nothing if the key is not in this dictionary.  
+    /// </summary>
+    /// <param name="key">The key that needs to be removed.</param>
+    public void Remove(string key) => _map.Remove(key);
+
+    /// <summary>
+    /// Removes all of the entries from this dictionary. The dictionary will be empty after this call returns. 
+    /// </summary>
+    public void Clear() => _map.Clear();
+
+    /// <summary>
+    /// Returns a String array containing the keys in this dictionary. 
+    /// </summary>
+    /// <returns>A KeyCollection of the keys in this dictionary.</returns>
+    public SortedDictionary<string, object?>.KeyCollection GetKeys() => _map.Keys;
+
+    /// <summary>
+    /// Gets or sets the value associated with the specified key.
+    /// </summary>
+    /// <param name="key">The key of the value to get or set.</param>
+    /// <returns>The value associated with the specified key.</returns>
+    public object? this[string key]
+    {
+        get => _map.TryGetValue(key, out var value) ? value : null;
+        set => _map[key] = value;
+    }
+
+    /// <summary>
+    /// Returns the dictionary's content as a JSON string. 
+    /// </summary>
+    /// <returns>The dictionary's content as a JSON string.</returns>
+    public override string ToString() => ToJsonString();
+
+    /// <summary>
+    /// Returns the dictionary's content as a JSON string. 
+    /// </summary>
+    /// <returns>The dictionary's content as a JSON string.</returns>
+    public string ToJsonString()
+    {
+        var dict = ToSerializableDictionary();
+        return JsonSerializer.Serialize(dict);
+    }
+
+    /// <summary>
+    /// Returns a deep clone of the current instance.
+    /// </summary>
+    /// <returns>A deep clone of this GSObject.</returns>
+    public GSObject Clone()
+    {
+        var json = ToJsonString();
+        return new GSObject(json);
+    }
+
+    /// <summary>
+    /// Casts this GSObject to a typed object.
+    /// </summary>
+    /// <typeparam name="T">The target type.</typeparam>
+    /// <returns>A new instance of T populated with data from this GSObject.</returns>
+    public T Cast<T>() where T : class, new()
+    {
+        return (T)Cast(typeof(T));
+    }
+
+    #endregion
+
+    #region Internal Methods
+
+    internal object Cast(Type requestedType)
+    {
+        var instance = Activator.CreateInstance(requestedType)!;
+        var members = GetTypeMembers(requestedType);
+
+        foreach (var member in members)
+        {
+            _map.TryGetValue(member.Name, out var value);
+            var memberType = GetMemberType(member);
+
+            if (value == null)
+            {
+                SetMemberValue(instance, member, null);
+                continue;
+            }
+
+            object? convertedValue = null;
+            
+            if (memberType.IsValueType || memberType == typeof(string))
+            {
+                var underlyingType = Nullable.GetUnderlyingType(memberType);
+                var targetType = underlyingType ?? memberType;
+
+                if (value.GetType() == targetType)
+                {
+                    convertedValue = value;
+                }
+                else if (value is IConvertible)
+                {
+                    try
+                    {
+                        convertedValue = Convert.ChangeType(value, targetType);
+                    }
+                    catch
+                    {
+                        // Keep null
+                    }
+                }
+            }
+            else if (value is GSObject gsObj)
+            {
+                convertedValue = gsObj.Cast(memberType);
+            }
+            else if (value is GSArray gsArr && memberType.GetInterfaces().Contains(typeof(IList)))
+            {
+                convertedValue = gsArr.CastInternal(memberType);
+            }
+
+            if (convertedValue != null)
+            {
+                SetMemberValue(instance, member, convertedValue);
+            }
+        }
+
+        return instance;
+    }
+
+    internal IEnumerable<T> GetInternal<T>(string[] path, int pos, bool attemptConversion)
+    {
+        if (!_map.TryGetValue(path[pos], out var value))
+            yield break;
+
+        foreach (var result in GetFromValue<T>(path, pos, value, attemptConversion))
+            yield return result;
+    }
+
+    internal static IEnumerable<T> GetFromValue<T>(string[] path, int pos, object? value, bool attemptConversion)
+    {
+        // End of the path -- return a value
+        if (pos == path.Length - 1)
+        {
+            if (value is T typedValue)
+            {
+                yield return typedValue;
+            }
+            else if (value == null && default(T) == null)
+            {
+                yield return default!;
+            }
+            else if (attemptConversion && typeof(T) == typeof(string))
+            {
+                yield return (T)(object)value!.ToString()!;
+            }
+            else if (attemptConversion && value is IConvertible)
+            {
+                var baseType = Nullable.GetUnderlyingType(typeof(T)) ?? typeof(T);
+                if (baseType.GetInterfaces().Contains(typeof(IConvertible)))
+                {
+                    object? converted = null;
+                    try { converted = Convert.ChangeType(value, baseType); }
+                    catch { /* ignore */ }
+                    if (converted != null)
+                        yield return (T)converted;
+                }
+            }
+        }
+        else if (value is GSObject gsObj)
+        {
+            foreach (var result in gsObj.GetInternal<T>(path, pos + 1, attemptConversion))
+                yield return result;
+        }
+        else if (value is GSArray gsArr)
+        {
+            foreach (var result in gsArr.GetInternal<T>(path, pos + 1, attemptConversion))
+                yield return result;
+        }
+    }
+
+    internal SortedDictionary<string, object?> ToSerializableDictionary()
+    {
+        var result = new SortedDictionary<string, object?>();
+        foreach (var kvp in _map)
+        {
+            result[kvp.Key] = kvp.Value switch
+            {
+                GSObject gsObj => gsObj.ToSerializableDictionary(),
+                GSArray gsArr => gsArr.ToSerializableArray(),
+                _ => kvp.Value
+            };
+        }
+        return result;
+    }
+
+    private T GetTypedValue<T>(string key, T defaultValue, bool useDefault)
+    {
+        if (_map.TryGetValue(key, out var val))
+        {
+            if (val == null) return (T)(object)null!;
+
+            var targetType = typeof(T);
+            
+            if (targetType == typeof(string))
+                return (T)(object)val.ToString()!;
+
+            if (val.GetType() == targetType)
+                return (T)val;
+
+            if (val is string str)
+            {
+                var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+                
+                // Use InvariantCulture for all numeric parsing to ensure consistent behavior across locales
+                if (underlyingType == typeof(int)) return (T)(object)int.Parse(str, CultureInfo.InvariantCulture);
+                if (underlyingType == typeof(long)) return (T)(object)long.Parse(str, CultureInfo.InvariantCulture);
+                if (underlyingType == typeof(bool)) return (T)(object)bool.Parse(str);
+                if (underlyingType == typeof(double)) return (T)(object)double.Parse(str, CultureInfo.InvariantCulture);
+                if (underlyingType == typeof(decimal)) return (T)(object)decimal.Parse(str, CultureInfo.InvariantCulture);
+            }
+
+            return (T)val;
+        }
+
+        if (useDefault)
+            return defaultValue;
+
+        throw new GSKeyNotFoundException($"GSObject does not contain a value for key {key}");
+    }
+
+    private static string[] TokenizePath(string path)
+    {
+        var tokens = new List<string>();
+        var current = new StringBuilder();
+        
+        for (int i = 0; i < path.Length; i++)
+        {
+            char c = path[i];
+            
+            if (c == '.')
+            {
+                if (current.Length > 0)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                }
+            }
+            else if (c == '[')
+            {
+                if (current.Length > 0)
+                {
+                    tokens.Add(current.ToString());
+                    current.Clear();
+                }
+                
+                // Find the closing bracket
+                int end = path.IndexOf(']', i);
+                if (end > i)
+                {
+                    tokens.Add(path[i..(end + 1)]);
+                    i = end;
+                }
+            }
+            else
+            {
+                current.Append(c);
+            }
+        }
+        
+        if (current.Length > 0)
+            tokens.Add(current.ToString());
+        
+        return tokens.ToArray();
+    }
+
+    #endregion
+
+    #region Reflection Helpers
+
+    private static List<MemberInfo> GetTypeMembers(Type type)
+    {
+        // Use proper locking to avoid race conditions
+        lock (TypeCacheLock)
+        {
+            if (TypeCache.TryGetValue(type, out var cached))
+                return cached;
+
+            var members = new List<MemberInfo>();
+            var isAnonymous = IsAnonymousType(type);
+
+            if (isAnonymous)
+            {
+                members.AddRange(type.GetProperties().Cast<MemberInfo>());
+            }
+            else
+            {
+                var ignoreAttrType = typeof(IgnoreAttribute);
+                
+                var properties = type.GetProperties()
+                    .Where(x => !x.IsDefined(ignoreAttrType, true))
+                    .Where(x => x.CanRead && x.CanWrite);
+                
+                var fields = type.GetFields()
+                    .Where(x => !x.IsDefined(ignoreAttrType, true));
+
+                members.AddRange(fields.Cast<MemberInfo>());
+                members.AddRange(properties.Cast<MemberInfo>());
+            }
+
+            TypeCache[type] = members;
+            return members;
+        }
+    }
+
+    private static bool IsAnonymousType(Type type)
+    {
+        return type.GetCustomAttributes(typeof(CompilerGeneratedAttribute), false).Length > 0
+               && type.FullName?.Contains("AnonymousType") == true;
+    }
+
+    private static object? GetMemberValue(object instance, MemberInfo member)
+    {
+        return member switch
+        {
+            FieldInfo field => field.GetValue(instance),
+            PropertyInfo prop => prop.GetValue(instance),
+            _ => null
+        };
+    }
+
+    private static void SetMemberValue(object instance, MemberInfo member, object? value)
+    {
+        switch (member)
+        {
+            case FieldInfo field:
+                field.SetValue(instance, value);
+                break;
+            case PropertyInfo prop:
+                prop.SetValue(instance, value);
+                break;
+        }
+    }
+
+    private static Type GetMemberType(MemberInfo member)
+    {
+        return member switch
+        {
+            FieldInfo field => field.FieldType,
+            PropertyInfo prop => prop.PropertyType,
+            _ => typeof(object)
+        };
+    }
+
+    #endregion
+
+    #region Nested Types
+
+    /// <summary>
+    /// Attribute to mark properties or fields that should be ignored during serialization.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
+    public sealed class IgnoreAttribute : Attribute
+    {
+    }
+
+    #endregion
 }
