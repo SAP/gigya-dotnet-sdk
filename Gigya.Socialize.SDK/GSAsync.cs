@@ -1,213 +1,259 @@
-﻿using System;
-using System.IO;
+/*
+ * Copyright (C) 2024 SAP SE
+ * Modern .NET 9 SDK - GSAsync
+ */
+
 using System.Net;
-using System.Threading;
 using System.Text;
 
-namespace Gigya.Socialize.SDK {
+namespace Gigya.Socialize.SDK;
 
+/// <summary>
+/// Base class for asynchronous operations implementing IAsyncResult.
+/// </summary>
+[Obsolete("Use async/await pattern with SendAsync instead.")]
+public class GSAsync : IAsyncResult
+{
+    /// <summary>
+    /// Gets the user-defined object that qualifies or contains information about an asynchronous operation.
+    /// </summary>
+    public object? AsyncState { get; protected set; }
 
-public class GSAsync : IAsyncResult {
-    public object     AsyncState             { get; protected set; }
-    public WaitHandle AsyncWaitHandle        { get; protected set; }
-    public bool       CompletedSynchronously { get; protected set; }
-    public bool       IsCompleted            { get; protected set; }
+    /// <summary>
+    /// Gets a WaitHandle that is used to wait for an asynchronous operation to complete.
+    /// </summary>
+    public WaitHandle AsyncWaitHandle { get; protected set; }
 
-    public GSAsync(object AsyncState, WaitHandle AsyncWaitHandle, bool CompletedSynchronously, bool IsCompleted) {
-        this.AsyncState             = AsyncState;
-        this.AsyncWaitHandle        = AsyncWaitHandle;
-        this.CompletedSynchronously = CompletedSynchronously;
-        this.IsCompleted            = IsCompleted;
+    /// <summary>
+    /// Gets a value that indicates whether the asynchronous operation completed synchronously.
+    /// </summary>
+    public bool CompletedSynchronously { get; protected set; }
+
+    /// <summary>
+    /// Gets a value that indicates whether the asynchronous operation has completed.
+    /// </summary>
+    public bool IsCompleted { get; protected set; }
+
+    /// <summary>
+    /// Initializes a new instance of the GSAsync class.
+    /// </summary>
+    /// <param name="asyncState">User-defined state object.</param>
+    /// <param name="asyncWaitHandle">Wait handle for the operation.</param>
+    /// <param name="completedSynchronously">Whether the operation completed synchronously.</param>
+    /// <param name="isCompleted">Whether the operation is completed.</param>
+    public GSAsync(object? asyncState, WaitHandle asyncWaitHandle, bool completedSynchronously, bool isCompleted)
+    {
+        AsyncState = asyncState;
+        AsyncWaitHandle = asyncWaitHandle;
+        CompletedSynchronously = completedSynchronously;
+        IsCompleted = isCompleted;
     }
 }
 
-
 /// <summary>
-/// This class encapsulates 2 actions:
-/// 
-/// 1. Given a WebRequest and the request's body, it will asynchronously obtain the request stream, write the request
-///    body, read the response headers, and read the response body. This class provides an IAsyncResult interface that
-///    can be used to wait until all these operations are complete, atomically. The CompletedSynchronously property will
-///    be set to true only if all operations completed synchronously. During this process we do not hold up any threads.
-///    
-/// 2. If an error occurs along the way, the exception is stored in the Error property. In such a case WebResponse and
-///    ResponseBody may or may not be null. In either case, it is guaranteed that the AsyncWaitHandle event will be set
-///    and your callback called (in that order).
+/// Encapsulates asynchronous HTTP request operations.
+/// Given a WebRequest and the request's body, it will asynchronously obtain the request stream,
+/// write the request body, read the response headers, and read the response body.
 /// </summary>
-public class GSAsyncRequest : GSAsync {
+[Obsolete("Use async/await pattern with SendAsync instead.")]
+public class GSAsyncRequest : GSAsync
+{
+    /// <summary>
+    /// Gets the HTTP request.
+    /// </summary>
+    public HttpWebRequest Request { get; protected set; }
 
-    public HttpWebRequest  Request      { get; protected set; }
-    public HttpWebResponse Response     { get; protected set; }
-    public string          ResponseBody { get; protected set; }
-    public Exception       Error        { get; protected set; }
+    /// <summary>
+    /// Gets the HTTP response.
+    /// </summary>
+    public HttpWebResponse? Response { get; protected set; }
 
+    /// <summary>
+    /// Gets the response body as a string.
+    /// </summary>
+    public string? ResponseBody { get; protected set; }
 
+    /// <summary>
+    /// Gets any error that occurred during the operation.
+    /// </summary>
+    public Exception? Error { get; protected set; }
+
+    private readonly byte[] _requestBody;
+    private readonly AsyncCallback? _callback;
+    private readonly byte[] _byteBuf = new byte[10 * 1024];
+    private readonly char[] _charBuf = new char[10 * 1024];
+    private readonly StringBuilder _builder = new(10 * 1024);
+    private Decoder? _decoder;
+
+    /// <summary>
+    /// Initializes a new instance of the GSAsyncRequest class.
+    /// </summary>
     /// <param name="request">A newly-created WebRequest.</param>
     /// <param name="requestBody">The body of the request that will be asynchronously written.</param>
-    /// <param name="callback">An optioanl callback function that will be called AFTER the AsyncWaitHandle event is set.</param>
-    /// <param name="state">An optional state that is stored in AsyncState which you can access once your calback is called.</param>
-    public GSAsyncRequest(HttpWebRequest request, byte[] requestBody, AsyncCallback callback, object state)
+    /// <param name="callback">An optional callback function that will be called AFTER the AsyncWaitHandle event is set.</param>
+    /// <param name="state">An optional state that is stored in AsyncState which you can access once your callback is called.</param>
+    public GSAsyncRequest(HttpWebRequest request, byte[] requestBody, AsyncCallback? callback, object? state)
         : base(state, new ManualResetEvent(false), false, false)
     {
-        Request          = request;
-        this.requestBody = requestBody;
-        this.callback    = callback;
+        Request = request;
+        _requestBody = requestBody;
+        _callback = callback;
     }
 
-
-    // Step 1: We initiate an aync request to get the request stream. Do not call the synchronous GetRequestStream();
-    //         it will silently degrade a subsequent call to BeginGetResponse() to be fully syncronous.
-    //         If an error occurs we store it and call-back the user.
-
-    public void BeginSend() {
-        HandleError(() => {
+    /// <summary>
+    /// Begins the asynchronous send operation.
+    /// </summary>
+    public void BeginSend()
+    {
+        HandleError(() =>
+        {
             Request.BeginGetRequestStream(OnGotRequestStream, null);
         });
     }
 
-
-    // Step 2: Once the request stream is obtained, we write the request body. NOTE: The request body can only be
-    //         written syncronously; writing it using BeginWrite() seems to cause the EndGetResponse() at step 4 to fail
-    //         ("Request cancelled"). [TODO] Revisit this issue in later .Net framework versions.
-    
-    void OnGotRequestStream(IAsyncResult ar) {
-        HandleError(() => {
+    private void OnGotRequestStream(IAsyncResult ar)
+    {
+        HandleError(() =>
+        {
             CompletedSynchronously = ar.CompletedSynchronously;
-            using (Stream reqStream = Request.EndGetRequestStream(ar))
-                reqStream.Write(requestBody, 0, requestBody.Length); // Note: A fully-async BeginWrite here seems to later fail EndGetResponse()
+            using (var reqStream = Request.EndGetRequestStream(ar))
+                reqStream.Write(_requestBody, 0, _requestBody.Length);
             Request.BeginGetResponse(OnGotResponseHeaders, null);
         });
     }
 
-
-    // Step 3: Once the response headers are obtained, we create a decoder based on the content encoding and start
-    //         reading the body.
-
-    void OnGotResponseHeaders(IAsyncResult ar) {
-        HandleError(() => {
+    private void OnGotResponseHeaders(IAsyncResult ar)
+    {
+        HandleError(() =>
+        {
             CompletedSynchronously &= ar.CompletedSynchronously;
             Response = (HttpWebResponse)Request.EndGetResponse(ar);
-            decoder = Encoding.GetEncoding(Response.CharacterSet ?? "utf-8").GetDecoder();
-            Response.GetResponseStream().BeginRead(byteBuf, 0, byteBuf.Length, OnResponseChunkRead, null);
+            _decoder = Encoding.GetEncoding(Response.CharacterSet ?? "utf-8").GetDecoder();
+            Response.GetResponseStream()!.BeginRead(_byteBuf, 0, _byteBuf.Length, OnResponseChunkRead, null);
         });
     }
 
-
-    // Step 4: We repeatedly read byte chunks from the response body and convert them into characters. When the
-    //         response is fully read, we store it in the ResponseBody and call back the user's callback.
-
-    void OnResponseChunkRead(IAsyncResult ar) {
-        HandleError(() => {
+    private void OnResponseChunkRead(IAsyncResult ar)
+    {
+        HandleError(() =>
+        {
             CompletedSynchronously &= ar.CompletedSynchronously;
-            bool completed;
-            int bytesUsed, charsUsed, read = Response.GetResponseStream().EndRead(ar);
-            decoder.Convert(byteBuf, 0, read, charBuf, 0, charBuf.Length, read == 0, out bytesUsed, out charsUsed, out completed);
-            builder.Append(charBuf, 0, charsUsed);
+            var read = Response!.GetResponseStream()!.EndRead(ar);
+            _decoder!.Convert(_byteBuf, 0, read, _charBuf, 0, _charBuf.Length, read == 0, out _, out var charsUsed, out _);
+            _builder.Append(_charBuf, 0, charsUsed);
             if (read > 0)
-                Response.GetResponseStream().BeginRead(byteBuf, 0, byteBuf.Length, OnResponseChunkRead, null);
-            else {
-                ResponseBody = builder.ToString();
+                Response.GetResponseStream()!.BeginRead(_byteBuf, 0, _byteBuf.Length, OnResponseChunkRead, null);
+            else
+            {
+                ResponseBody = _builder.ToString();
                 SignalCompleted(null);
             }
         });
     }
 
-
-    void HandleError(Action action) {
-        try {
+    private void HandleError(Action action)
+    {
+        try
+        {
             action();
         }
-        catch (Exception e) {
-            if (IsCompleted) // This can happen if the inner action() calls SignalCompleted() which set IsCompleted to
-                throw;       // true and called the user callback which triggered an unhandled exception.
-            else SignalCompleted(e);
+        catch (Exception e)
+        {
+            if (IsCompleted)
+                throw;
+            else
+                SignalCompleted(e);
         }
     }
 
-
-    void SignalCompleted(Exception error) {
+    private void SignalCompleted(Exception? error)
+    {
         IsCompleted = true;
         Error = error;
         ((ManualResetEvent)AsyncWaitHandle).Set();
-        if (callback != null)
-            callback(this);
+        _callback?.Invoke(this);
     }
-
-
-    byte[]         byteBuf = new byte[10 * 1024];
-    char[]         charBuf = new char[10 * 1024];
-    StringBuilder  builder = new StringBuilder(10 * 1024);
-    Decoder        decoder;
-    byte[]         requestBody;
-    AsyncCallback  callback;
 }
 
-
-
 /// <summary>
-/// This class attempts to resend an asynchronous request as long as it fails to satisfy some criteria, while providing
-/// a single wait handle that the user can wait on which will become signaled once the criteria is met. The requests are
-/// performed using the GSAsyncRequest helper class (above). You need to supply a predicate which receives a
-/// GSAsyncRequest object and determines whether to resend the request or not, by probing the GSAsyncRequest's Error
-/// field (in case a transport error occured), Response field (for a HTTP error code) or ResponseBody field. You also
-/// need to supply a factory method that re-generates a new request to be sent, since we cannot re-send the underlying
-/// .Net WebRequest, nor clone it, nor would it be desirable to do so in scenarios where the protocol protects against
-/// duplicate requests (such as OAuth v1).
+/// Attempts to resend an asynchronous request as long as it fails to satisfy some criteria.
+/// Provides a single wait handle that becomes signaled once the criteria is met.
 /// </summary>
-public class GSAsyncReliableRequest : GSAsync {
-
+[Obsolete("Use async/await pattern with SendAsync instead.")]
+public class GSAsyncReliableRequest : GSAsync
+{
+    /// <summary>
+    /// Delegate for creating new requests.
+    /// </summary>
+    /// <param name="request">The created HTTP request.</param>
+    /// <param name="requestBody">The request body.</param>
     public delegate void RequestFactory(out HttpWebRequest request, out byte[] requestBody);
-    public GSAsyncRequest GSAsyncRequest { get; protected set; }
 
+    /// <summary>
+    /// Gets the current GSAsyncRequest.
+    /// </summary>
+    public GSAsyncRequest GSAsyncRequest { get; protected set; } = null!;
 
-    public GSAsyncReliableRequest(RequestFactory requestFactory, Func<GSAsyncRequest, bool> resendPredicate, AsyncCallback callback, object state)
+    private readonly RequestFactory _requestFactory;
+    private Func<GSAsyncRequest, bool>? _resendPredicate;
+    private readonly AsyncCallback? _callback;
+
+    /// <summary>
+    /// Initializes a new instance of the GSAsyncReliableRequest class.
+    /// </summary>
+    /// <param name="requestFactory">Factory method to create new requests.</param>
+    /// <param name="resendPredicate">Predicate to determine if request should be resent.</param>
+    /// <param name="callback">Callback when operation completes.</param>
+    /// <param name="state">User state object.</param>
+    public GSAsyncReliableRequest(
+        RequestFactory requestFactory,
+        Func<GSAsyncRequest, bool> resendPredicate,
+        AsyncCallback? callback,
+        object? state)
         : base(state, new ManualResetEvent(false), false, false)
     {
-        this.requestFactory  = requestFactory;
-        this.resendPredicate = resendPredicate;
-        this.callback        = callback;
+        _requestFactory = requestFactory;
+        _resendPredicate = resendPredicate;
+        _callback = callback;
         FetchNewRequest();
     }
 
-
-    public void BeginReliableSend() {
+    /// <summary>
+    /// Begins the reliable send operation.
+    /// </summary>
+    public void BeginReliableSend()
+    {
         GSAsyncRequest.BeginSend();
     }
 
-
-    public void Abort() {
-        resendPredicate = null;
+    /// <summary>
+    /// Aborts the current request.
+    /// </summary>
+    public void Abort()
+    {
+        _resendPredicate = null;
         GSAsyncRequest.Request.Abort();
     }
 
-
-    void FetchNewRequest() {
-        HttpWebRequest webRequest;
-        byte[] requestBody;
-        requestFactory(out webRequest, out requestBody);
+    private void FetchNewRequest()
+    {
+        _requestFactory(out var webRequest, out var requestBody);
         GSAsyncRequest = new GSAsyncRequest(webRequest, requestBody, OnResult, null);
     }
 
-
-    void OnResult(IAsyncResult ar) {
-        if (resendPredicate(GSAsyncRequest)) {
+    private void OnResult(IAsyncResult ar)
+    {
+        if (_resendPredicate != null && _resendPredicate(GSAsyncRequest))
+        {
             FetchNewRequest();
             BeginReliableSend();
         }
-        else {
+        else
+        {
             CompletedSynchronously = GSAsyncRequest.CompletedSynchronously;
             IsCompleted = GSAsyncRequest.IsCompleted;
             ((ManualResetEvent)AsyncWaitHandle).Set();
-            if (callback != null)
-                callback(this);
+            _callback?.Invoke(this);
         }
     }
-
-
-    Func<GSAsyncRequest, bool> resendPredicate;
-    RequestFactory requestFactory;
-    AsyncCallback  callback;
-}
-
-
 }

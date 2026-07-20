@@ -1,50 +1,78 @@
-﻿/*
- * Copyright (C) 2011 Gigya, Inc.
+/*
+ * Copyright (C) 2024 SAP SE
+ * Modern .NET 9 SDK - Logger
  */
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 
-namespace Gigya.Socialize.SDK
+namespace Gigya.Socialize.SDK;
+
+/// <summary>
+/// Simple logging utility for SDK operations.
+/// Captures diagnostic information during request/response processing.
+/// </summary>
+public class GSLogger
 {
-    public class GSLogger
+    private readonly StringBuilder _sb = new();
+
+    /// <summary>
+    /// Writes data to the log.
+    /// </summary>
+    /// <param name="data">The data to write.</param>
+    public void Write(object? data)
     {
-        private StringBuilder sb = new StringBuilder();
-        public void Write(Object data)
-        {
-            if (data == null) return;
-            Write(null, data.ToString());
-        }
+        if (data == null) return;
+        Write(null, data.ToString());
+    }
 
-        public void Write(Exception ex)
-        {
-            Write(ex.StackTrace);
-        }
+    /// <summary>
+    /// Writes an exception to the log.
+    /// </summary>
+    /// <param name="ex">The exception to write.</param>
+    public void Write(Exception ex)
+    {
+        Write(ex.StackTrace);
+    }
 
-        public void Write(String key, Object data)
-        {
-            if (key != null)
-                sb.Append(key + ": ");
-            if (data != null)
-                sb.Append(data.ToString() + "\r\n");
-        }
+    /// <summary>
+    /// Writes a key-value pair to the log.
+    /// </summary>
+    /// <param name="key">The key.</param>
+    /// <param name="data">The data value.</param>
+    public void Write(string? key, object? data)
+    {
+        if (key != null)
+            _sb.Append(key + ": ");
+        if (data != null)
+            _sb.Append(data.ToString() + "\r\n");
+    }
 
-        public void WriteFormat(String format, params Object[] args)
-	    {
-            
-		    Write(String.Format(format, args));
-	    }
+    /// <summary>
+    /// Writes formatted data to the log.
+    /// </summary>
+    /// <param name="format">The format string.</param>
+    /// <param name="args">The format arguments.</param>
+    public void WriteFormat(string format, params object[] args)
+    {
+        Write(string.Format(format, args));
+    }
 
-        public override String ToString()
-        {
-            return sb.ToString();
-        }
+    /// <summary>
+    /// Copies the contents of another logger to this logger.
+    /// </summary>
+    /// <param name="other">The logger to copy from.</param>
+    internal void Write(GSLogger? other)
+    {
+        if (other != null)
+            _sb.Append(other.ToString());
+    }
+
+    /// <summary>
+    /// Returns the log contents as a string.
+    /// </summary>
+    /// <returns>The log contents.</returns>
+    public override string ToString()
+    {
+        return _sb.ToString();
     }
 }
-
-
-
-
-
