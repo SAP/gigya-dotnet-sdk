@@ -1,277 +1,285 @@
-using System;
-using System.Collections.Generic;
+/*
+ * Copyright (C) 2024 SAP SE
+ * Modern .NET 9 SDK - GSAuthMtlsRequest
+ * Uses HttpClient with SslStreamCertificateContext for mTLS
+ */
+
+using System.Collections.Concurrent;
+using System.Collections.Specialized;
 using System.Net;
+using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text.RegularExpressions;
 
-namespace Gigya.Socialize.SDK
+namespace Gigya.Socialize.SDK;
+
+/// <summary>
+/// A request class that uses mutual TLS (mTLS) authentication with client certificates.
+/// Uses modern HttpClient with SslStreamCertificateContext for proper certificate chain handling.
+/// </summary>
+public class GSAuthMtlsRequest : GSRequest
 {
     /// <summary>
-    /// GSAuthMtlsRequest - A request class that uses mutual TLS (mTLS) authentication.
-    /// Accepts client certificate & private key via PEM string or file path (either form is acceptable).
+    /// The default domain for mTLS API calls.
     /// </summary>
-    public class GSAuthMtlsRequest : GSRequest
+    public const string DefaultMtlsDomain = "mtls.us1.gigya.com";
+
+    /// <summary>
+    /// Cache of HttpClient instances keyed by certificate thumbprint.
+    /// This enables connection pooling while supporting multiple certificates.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, HttpClient> _httpClientCache = new();
+
+    private readonly MtlsConfig _mtlsConfig;
+
+    /// <summary>
+    /// Constructs an mTLS-authenticated request.
+    /// </summary>
+    /// <param name="apiKey">Gigya's API key from Site Setup.</param>
+    /// <param name="apiMethod">The API method to call (e.g., "accounts.getAccountInfo").</param>
+    /// <param name="mtlsConfig">The mTLS configuration containing certificate and key.</param>
+    /// <param name="clientParams">Optional request parameters.</param>
+    /// <param name="additionalHeaders">Optional additional HTTP headers.</param>
+    /// <param name="proxy">Optional proxy for HTTP requests.</param>
+    public GSAuthMtlsRequest(
+        string? apiKey,
+        string apiMethod,
+        MtlsConfig mtlsConfig,
+        object? clientParams = null,
+        NameValueCollection? additionalHeaders = null,
+        IWebProxy? proxy = null)
+        : base(apiKey, null, apiMethod, clientParams, true, null, additionalHeaders, proxy)
     {
-        private readonly MtlsConfig mtlsConfig;
-        
-        /// <param name="apiKey">Site API key.</param>
-        /// <param name="apiMethod">The API method to call (e.g., "accounts.getAccountInfo")</param>
-        /// <param name="mtlsConfig">The mTLS configuration containing certificate and private key (as PEM strings or file paths)</param>
-        public GSAuthMtlsRequest(string apiKey, string apiMethod, MtlsConfig mtlsConfig)
-            : base(apiKey, null, apiMethod, null, true)
+        _mtlsConfig = mtlsConfig ?? throw new ArgumentNullException(nameof(mtlsConfig));
+        // For mTLS, we don't want to prepend the method namespace to the domain.
+        // APIDomain remains as the standard datacenter domain (e.g., "us1.gigya.com");
+        // GetRequestDomain dynamically resolves it to the mTLS domain at request time.
+        UseMethodDomain = false;
+    }
+
+    /// <summary>
+    /// Validates the request before sending.
+    /// </summary>
+    protected override bool IsValidRequest()
+    {
+        return !string.IsNullOrEmpty(Method);
+    }
+
+    /// <summary>
+    /// Extracts the datacenter from an API domain and returns the corresponding mTLS domain.
+    /// For example, "eu1.gigya.com" returns "mtls.eu1.gigya.com".
+    /// Falls back to <see cref="DefaultMtlsDomain"/> when the input is null, empty, or has no dot.
+    /// </summary>
+    /// <param name="apiDomain">The API domain (e.g., "eu1.gigya.com").</param>
+    /// <returns>The mTLS domain for the datacenter, or "mtls.us1.gigya.com" as fallback.</returns>
+    public static string GetMtlsDomain(string? apiDomain)
+    {
+        if (string.IsNullOrWhiteSpace(apiDomain))
+            return DefaultMtlsDomain;
+
+        var firstDot = apiDomain.IndexOf('.');
+        if (firstDot <= 0)
+            return DefaultMtlsDomain;
+
+        var datacenter = apiDomain[..firstDot];
+        return $"mtls.{datacenter}.gigya.com";
+    }
+
+    /// <summary>
+    /// Gets the request domain for mTLS endpoints.
+    /// Dynamically resolves the mTLS domain from the configured <see cref="GSRequest.APIDomain"/>.
+    /// For example, setting APIDomain to "eu1.gigya.com" routes requests to "mtls.eu1.gigya.com".
+    /// </summary>
+    protected override string GetRequestDomain(string methodNamespace)
+    {
+        return GetMtlsDomain(APIDomain);
+    }
+
+    /// <summary>
+    /// Sets default parameters before signing.
+    /// For mTLS, we don't set oauth_token or userKey - just the apiKey in Sign().
+    /// </summary>
+    protected override void SetDefaultParams(string httpMethod, string resourceUri)
+    {
+        // mTLS doesn't use the standard auth params - apiKey is set in Sign()
+    }
+
+    /// <summary>
+    /// Signs the request. For mTLS, this just sets the apiKey parameter.
+    /// Authentication is via client certificate, no cryptographic signature needed.
+    /// </summary>
+    protected override void Sign(string httpMethod, string resourceUri)
+    {
+        // Api key is required for mTLS requests
+        if (ApiKey != null)
         {
-            if (mtlsConfig == null)
-            {
-                throw new ArgumentNullException(nameof(mtlsConfig), "MtlsConfig cannot be null");
-            }
-            this.mtlsConfig = mtlsConfig;
-            mtlsConfig.Validate();
+            SetParam("apiKey", ApiKey);
         }
-        
-        /// <summary>
-        /// mTLS uses the client certificate as the credential, so don't send oauth_token.
-        /// Only the apiKey is required so the server can identify the site.
-        /// </summary>
-        protected override void SetDefaultParams(string httpMethod, string resourceUri)
+    }
+
+    /// <summary>
+    /// Gets the HttpClient configured with mTLS client certificate.
+    /// Uses a cached HttpClient per certificate thumbprint to enable connection pooling.
+    /// </summary>
+    protected override HttpClient GetHttpClient()
+    {
+        var thumbprint = _mtlsConfig.GetCertificateThumbprint();
+        return _httpClientCache.GetOrAdd(thumbprint, _ => CreateMtlsHttpClient());
+    }
+
+    /// <summary>
+    /// Creates an HttpClient configured with the mTLS client certificate.
+    /// Uses SslStreamCertificateContext for proper certificate chain handling.
+    /// </summary>
+    private HttpClient CreateMtlsHttpClient()
+    {
+        var certPem = _mtlsConfig.LoadCertificate();
+        var keyPem = _mtlsConfig.LoadPrivateKey();
+        byte[]? pfxBytes = null;
+
+        try
         {
-            if (ApiKey != null)
+            // Parse private key
+            var privateKey = ParsePemPrivateKey(keyPem);
+            if (privateKey == null)
             {
-                SetParam("apiKey", ApiKey);
-            }
-        }
-
-        protected override void Sign(string httpMethod, string resourceUri)
-        {
-            // mTLS does not require request signing; the client certificate is the credential.
-        }
-        
-        protected override bool IsValidRequest()
-        {
-            return true;
-        }
-
-        /// <summary>
-        /// Resolves the mTLS host based on the configured API domain.
-        /// Extracts the datacenter (the first segment before the first dot) from
-        /// <see cref="GSRequest.APIDomain"/> and returns "mtls.{datacenter}.gigya.com".
-        /// Falls back to "mtls.us1.gigya.com" when the domain is unset or has no datacenter segment.
-        /// </summary>
-        public string GetMtlsDomain()
-        {
-            string apiDomain = APIDomain ?? string.Empty;
-            int dotIndex = apiDomain.IndexOf('.');
-            string datacenter = dotIndex > 0 ? apiDomain.Substring(0, dotIndex) : apiDomain;
-            if (string.IsNullOrEmpty(datacenter))
-            {
-                return "mtls.us1.gigya.com";
-            }
-            return "mtls." + datacenter + ".gigya.com";
-        }
-
-        /// <summary>
-        /// Route mTLS requests to the datacenter-specific endpoint
-        /// (e.g. mtls.eu1.gigya.com for an APIDomain of eu1.gigya.com).
-        /// </summary>
-        protected override string GetRequestDomain(string methodNamespace)
-        {
-            return GetMtlsDomain();
-        }
-
-        /// <summary>
-        /// Override hook method to apply client certificates to HTTPS connections.
-        /// This method is called by GSRequest.Send() after creating the connection.
-        /// </summary>
-        protected override void ConfigureRequest(HttpWebRequest request)
-        {
-            if (request == null || !request.RequestUri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
+                throw new InvalidOperationException("Failed to parse private key from PEM");
             }
 
-            CertificateBundle? bundle = LoadCertificates();
-            if (bundle == null)
+            // Parse certificate chain
+            var chain = ParseCertificateChain(certPem);
+            if (chain.Length == 0)
             {
-                throw new InvalidOperationException("Failed to load client certificates - cannot proceed with mTLS");
+                throw new InvalidOperationException("No certificates found in PEM");
             }
 
-            try
-            {
-                X509Certificate2 clientCertificate = CreateClientCertificate(bundle);
-                ApplyCertificatesToConnection(request, clientCertificate);
-            }
-            catch (Exception e)
-            {
-                Logger.Write("GSAuthMtlsRequest", "Failed to configure mTLS: " + e.Message);
-                Logger.Write(e);
-                throw new InvalidOperationException("Failed to configure mTLS: " + e.Message, e);
-            }
-        }
+            // Combine leaf certificate with private key
+            var leafCert = chain[0];
+            var leafWithKey = leafCert.CopyWithPrivateKey(privateKey);
 
-        /// <summary>
-        /// Load certificates from mTLS configuration.
-        /// </summary>
-        private CertificateBundle? LoadCertificates()
-        {
-            try
-            {
-                string certPem = mtlsConfig.LoadCertificate();
-                string keyPem = mtlsConfig.LoadPrivateKey();
-                RSA? privateKey = ParsePemPrivateKey(keyPem);
-                X509Certificate2[] chain = ParseCertificateChain(certPem);
+            // Export to PFX and reload with proper key storage flags.
+            // The PFX round-trip is required so the TLS stack can access the private key.
+            // We use a randomly generated temporary password (not user-provided) so that
+            // no sensitive credential is ever stored as an immutable string in memory.
+            var tempPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+            pfxBytes = leafWithKey.Export(X509ContentType.Pkcs12, tempPassword);
+            var clientCertWithKey = X509CertificateLoader.LoadPkcs12(
+                pfxBytes,
+                tempPassword,
+                X509KeyStorageFlags.Exportable
+            );
 
-                if (privateKey == null || chain.Length == 0)
+            // Collect intermediate certificates
+            var additionalCerts = new X509Certificate2Collection();
+            for (int i = 1; i < chain.Length; i++)
+            {
+                additionalCerts.Add(chain[i]);
+            }
+
+            // Create certificate context with chain for mTLS
+            var certContext = SslStreamCertificateContext.Create(clientCertWithKey, additionalCerts);
+
+            // Create handler with mTLS configuration
+            // Enable connection pooling for better performance
+            var handler = new SocketsHttpHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
+                SslOptions = new SslClientAuthenticationOptions
                 {
-                    return null;
+                    ClientCertificateContext = certContext
+                    // Server certificate validation uses default system CA store
                 }
+            };
 
-                return new CertificateBundle(privateKey, chain);
-            }
-            catch (Exception e)
+            // Configure proxy if set
+            if (Proxy != null)
             {
-                Logger.Write("GSAuthMtlsRequest", "Error loading certificates: " + e.Message);
-                return null;
+                handler.Proxy = Proxy;
+                handler.UseProxy = true;
             }
+
+            return new HttpClient(handler)
+            {
+                Timeout = System.Threading.Timeout.InfiniteTimeSpan
+            };
         }
-
-        /// <summary>
-        /// Create a client certificate with private key from the certificate bundle.
-        /// </summary>
-        private X509Certificate2 CreateClientCertificate(CertificateBundle bundle)
+        catch (CryptographicException ex)
         {
-            try
-            {
-                char[] password = mtlsConfig.GetPassword();
-                string pfxPassword = new string(password);
-
-                // Build keystore (PFX) with private key and certificate chain
-                var keyStore = new X509Certificate2Collection();
-                
-                var leafCert = bundle.Chain[0];
-                var intermediateCert = bundle.Chain[1];
-                
-                // Combine leaf certificate with private key
-                var leafWithKey = leafCert.CopyWithPrivateKey(bundle.PrivateKey);
-                keyStore.Add(leafWithKey);
-                keyStore.Add(intermediateCert);
-
-                // Export to PFX bytes
-                byte[]? pfxBytes = keyStore.Export(X509ContentType.Pkcs12, pfxPassword);
-
-                var finalCert = X509CertificateLoader.LoadPkcs12(
-                    pfxBytes,
-                    pfxPassword,
-                    X509KeyStorageFlags.UserKeySet | X509KeyStorageFlags.Exportable
-                );
-
-                if (!finalCert.HasPrivateKey)
-                {
-                    throw new InvalidOperationException("Final certificate does not contain private key after PFX import");
-                }
-                
-                // Clean up sensitive data
+            throw new InvalidOperationException("Failed to load client certificate from PEM", ex);
+        }
+        finally
+        {
+            // Clear the PFX bytes from memory
+            if (pfxBytes != null)
                 Array.Clear(pfxBytes, 0, pfxBytes.Length);
-                Array.Clear(password, 0, password.Length);
+        }
+    }
 
-                return finalCert;
-            }
-            catch (Exception e)
-            {
-                Logger.Write("GSAuthMtlsRequest", "Error creating client certificate: " + e.Message);
-                throw;
-            }
+    /// <summary>
+    /// Parse certificate chain from PEM format.
+    /// </summary>
+    private static X509Certificate2[] ParseCertificateChain(string pem)
+    {
+        var list = new List<X509Certificate2>();
+        var regex = new System.Text.RegularExpressions.Regex(
+            "-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+    
+        foreach (System.Text.RegularExpressions.Match m in regex.Matches(pem))
+        {
+            string base64 = m.Groups[1].Value
+                .Replace("\r", "")
+                .Replace("\n", "")
+                .Replace(" ", "");
+            
+            byte[] raw = Convert.FromBase64String(base64);
+            list.Add(X509CertificateLoader.LoadCertificate(raw));
         }
 
-        /// <summary>
-        /// Apply the client certificate to the HTTPS connection.
-        /// </summary>
-        private void ApplyCertificatesToConnection(HttpWebRequest request, X509Certificate2 clientCertificate)
-        {
-            request.ClientCertificates.Add(clientCertificate);
-        }
-        
-        /// <summary>
-        /// Inner class to hold certificate bundle (private key + certificate chain).
-        /// </summary>
-        private class CertificateBundle
-        {
-            public RSA PrivateKey { get; }
-            public X509Certificate2[] Chain { get; }
+        return list.ToArray();
+    }
 
-            public CertificateBundle(RSA privateKey, X509Certificate2[] chain)
-            {
-                PrivateKey = privateKey;
-                Chain = chain;
-            }
-        }
-        
-        // ----------------- Certificate parsing helpers -----------------
-        
-        /// <summary>
-        /// Parse certificate chain from PEM format.
-        /// </summary>
-        private static X509Certificate2[] ParseCertificateChain(string pem)
+    /// <summary>
+    /// Parse RSA private key from PEM format (PKCS#8 or PKCS#1).
+    /// </summary>
+    private static RSA? ParsePemPrivateKey(string pem)
+    {
+        if (string.IsNullOrWhiteSpace(pem))
         {
-            var list = new List<X509Certificate2>();
-            var regex = new Regex("-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
-                RegexOptions.Singleline);
-        
-            foreach (Match m in regex.Matches(pem))
-            {
-                string base64 = m.Groups[1].Value
-                    .Replace("\r", "")
-                    .Replace("\n", "")
-                    .Replace(" ", "");
-                
-                byte[] raw = Convert.FromBase64String(base64);
-                list.Add(X509CertificateLoader.LoadCertificate(raw));
-            }
-
-            return list.ToArray();
+            return null;
         }
 
-        /// <summary>
-        /// Parse RSA private key from PEM format (PKCS#8 or PKCS#1).
-        /// </summary>
-        private static RSA? ParsePemPrivateKey(string pem)
+        pem = pem.Trim();
+        bool isPkcs8 = pem.Contains("BEGIN PRIVATE KEY", StringComparison.Ordinal);
+        bool isPkcs1 = pem.Contains("BEGIN RSA PRIVATE KEY", StringComparison.Ordinal);
+        
+        // Trim the key headers/footers
+        pem = pem
+            .Replace("-----BEGIN PRIVATE KEY-----", "")
+            .Replace("-----END PRIVATE KEY-----", "")
+            .Replace("-----BEGIN RSA PRIVATE KEY-----", "")
+            .Replace("-----END RSA PRIVATE KEY-----", "")
+            .Replace("\r", "")
+            .Replace("\n", "")
+            .Replace(" ", "");
+            
+        byte[] pkcsKey = Convert.FromBase64String(pem);
+        RSA rsa = RSA.Create();
+
+        if (!isPkcs8 && !isPkcs1)
         {
-            if (string.IsNullOrWhiteSpace(pem))
-            {
-                return null;
-            }
+            throw new InvalidOperationException("Unsupported private key format. Expected PKCS#8 or PKCS#1 PEM format.");
+        }
 
-            pem = pem.Trim();
-            bool isPkcs8 = pem.Contains("BEGIN PRIVATE KEY", StringComparison.Ordinal);
-            bool isPkcs1 = pem.Contains("BEGIN RSA PRIVATE KEY", StringComparison.Ordinal);
-            pem = TrimKey(pem);
-            byte[] pkcsKey = Convert.FromBase64String(pem);
-            RSA rsa = RSA.Create();
-
-            if (!isPkcs8 && !isPkcs1)
-            {
-                throw new InvalidOperationException("Unsupported private key format. Expected PKCS#8 or PKCS#1 PEM format.");
-            }
-
-            if (isPkcs8)
-            {
-                rsa.ImportPkcs8PrivateKey(pkcsKey, out _);
-                return rsa;
-            }
-
-            rsa.ImportRSAPrivateKey(pkcsKey, out _);
+        if (isPkcs8)
+        {
+            rsa.ImportPkcs8PrivateKey(pkcsKey, out _);
             return rsa;
-                
         }
-        
-        private static String TrimKey(String pem) {
-            return pem
-                .Replace("-----BEGIN PRIVATE KEY-----", "")
-                .Replace("-----END PRIVATE KEY-----", "")
-                .Replace("-----BEGIN RSA PRIVATE KEY-----", "")
-                .Replace("-----END RSA PRIVATE KEY-----", "")
-                .Replace("\\s+", "");
-        }
-        
+
+        rsa.ImportRSAPrivateKey(pkcsKey, out _);
+        return rsa;
     }
 }
-

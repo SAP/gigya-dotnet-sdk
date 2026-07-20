@@ -1,20 +1,70 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <OutputType>Library</OutputType>
-    <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>Gigya.Socialize.SDK</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    
+    <!-- Assembly Information -->
     <AssemblyName>GSCSharpSDK</AssemblyName>
-    <SignAssembly>true</SignAssembly>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <RootNamespace>Gigya.Socialize.SDK</RootNamespace>
+    <Version>3.0.0</Version>
+    <AssemblyVersion>3.0.0.0</AssemblyVersion>
+    <FileVersion>3.0.0.0</FileVersion>
+    
+    <!-- Package Information -->
+    <PackageId>Gigya.Socialize.SDK</PackageId>
+    <Title>Gigya Socialize SDK</Title>
+    <Description>SAP Customer Data Cloud (Gigya) .NET SDK - Modern .NET 9 implementation</Description>
+    <Authors>SAP</Authors>
+    <Company>SAP SE</Company>
+    <Product>Gigya Socialize SDK</Product>
+    <Copyright>Copyright © SAP SE 2024</Copyright>
+    
+    <!-- Build Settings -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    
+    <!-- Strong Naming (for compatibility) -->
+    <SignAssembly>false</SignAssembly>
+    
+    <!-- Package Settings -->
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/SAP/gigya-dotnet-sdk</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SAP/gigya-dotnet-sdk</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>gigya;sap;cdc;customer-data-cloud;identity;authentication</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    
+    <!-- Enable deterministic builds -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
-  <PropertyGroup>
 
+  <!-- Source Link for debugging -->
+  <PropertyGroup Condition="'$(CI)' == 'true'">
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
-  <PropertyGroup>
-    <AssemblyOriginatorKeyFile>..\DO_NOT_PUBLISH_AssemblyStrongNameKey.snk</AssemblyOriginatorKeyFile>
-  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- Modern .NET dependencies for Phase 6 modernization -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+  </ItemGroup>
+
+  <!-- InternalsVisibleTo for testing -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Gigya.Socialize.SDK.Tests" />
+  </ItemGroup>
+
 </Project>
