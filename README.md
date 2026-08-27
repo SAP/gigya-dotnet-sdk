@@ -1,3 +1,5 @@
+[![REUSE status](https://api.reuse.software/badge/github.com/SAP/gigya-dotnet-sdk)](https://api.reuse.software/info/github.com/SAP/gigya-dotnet-sdk)
+
 # SAP Customer Data Cloud .NET SDK
 
 Modern .NET 9 SDK for SAP Customer Data Cloud (Gigya) API.
